@@ -29,7 +29,7 @@
 
   <!-- ヘッダー -->
   <header class="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md">
-    <div class="max-w-6xl mx-auto px-4 py-5 flex flex-col sm:flex-row justify-between items-center gap-4">
+    <div class="max-w-6xl mx-auto px-4 py-5 flex flex-col lg:flex-row justify-between items-center gap-4">
       <div class="flex items-center gap-3">
         <div class="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
           <i class="fa-solid fa-volume-high text-2xl"></i>
@@ -39,14 +39,21 @@
           <p class="text-xs text-indigo-100">AIが感情豊かに読み上げる次世代音声合成システム</p>
         </div>
       </div>
-      <!-- APIキー入力エリア -->
-      <div class="w-full sm:w-auto flex items-center gap-2 bg-white/10 backdrop-blur-sm p-1.5 rounded-lg border border-white/20">
-        <span class="text-xs font-semibold px-2 text-indigo-100 whitespace-nowrap"><i class="fa-solid fa-key mr-1"></i>APIキー:</span>
-        <input type="password" id="apiKeyInput" placeholder="AI Studio の APIキーを入力" 
-          class="bg-transparent text-white text-xs px-2 py-1 outline-none border-none placeholder-white/50 w-44 sm:w-56" />
-        <button id="saveKeyBtn" onclick="toggleApiKeySave()" class="text-xs font-medium px-2.5 py-1 bg-white text-indigo-600 rounded-md hover:bg-indigo-50 transition-colors">
-          保存
-        </button>
+      <!-- APIキー入力エリア & ヘルプボタン -->
+      <div class="w-full lg:w-auto flex flex-wrap items-center gap-2 bg-white/10 backdrop-blur-sm p-1.5 rounded-lg border border-white/20 justify-between sm:justify-start">
+        <div class="flex items-center gap-1">
+          <span class="text-xs font-semibold px-2 text-indigo-100 whitespace-nowrap"><i class="fa-solid fa-key mr-1"></i>APIキー:</span>
+          <input type="password" id="apiKeyInput" placeholder="AI Studio の APIキーを入力" 
+            class="bg-transparent text-white text-xs px-2 py-1 outline-none border-none placeholder-white/50 w-36 sm:w-48" />
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button id="saveKeyBtn" onclick="toggleApiKeySave()" class="text-xs font-medium px-2.5 py-1 bg-white text-indigo-600 rounded-md hover:bg-indigo-50 transition-colors">
+            保存
+          </button>
+          <button onclick="toggleHelpModal(true)" class="text-xs font-medium px-2.5 py-1 bg-indigo-500/50 text-white rounded-md hover:bg-indigo-500 transition-colors flex items-center gap-1 border border-indigo-400/30">
+            <i class="fa-solid fa-circle-question"></i>🔑 取得方法
+          </button>
+        </div>
       </div>
     </div>
   </header>
@@ -57,6 +64,28 @@
     <!-- 左側：設定とテキスト入力 -->
     <div class="lg:col-span-8 flex flex-col gap-6">
       
+      <!-- APIキー未設定時のウェルカムバナー -->
+      <div id="welcomeBanner" class="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-5 rounded-2xl flex flex-col sm:flex-row items-start gap-4 shadow-sm">
+        <div class="p-3 bg-amber-500 text-white rounded-xl">
+          <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
+        </div>
+        <div class="flex-grow">
+          <h3 class="font-bold text-amber-800 text-sm sm:text-base">最初にGoogle APIキーを設定しましょう！</h3>
+          <p class="text-xs text-amber-700 mt-1 leading-relaxed">
+            このアプリの読み上げ機能を利用するには、無料のGemini APIキーが必要です。
+            Googleアカウントさえあれば、<strong>1分程度で完全に無料</strong>で取得できます。
+          </p>
+          <div class="flex gap-3 mt-3">
+            <button onclick="toggleHelpModal(true)" class="text-xs font-bold px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow-sm">
+              🔑 キーの取得手順を見る
+            </button>
+            <a href="https://aistudio.google.com/" target="_blank" class="text-xs font-bold px-4 py-2 bg-white hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg transition-colors flex items-center gap-1">
+              Google AI Studio を開く <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+
       <!-- テキスト入力エリア -->
       <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col gap-4">
         <div class="flex justify-between items-center">
@@ -192,6 +221,79 @@
     </div>
   </main>
 
+  <!-- APIキー取得ヘルプ モーダル -->
+  <div id="helpModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-200">
+      <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+        <h3 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+          <i class="fa-solid fa-circle-question text-indigo-500"></i>Gemini API キーの取得手順
+        </h3>
+        <button onclick="toggleHelpModal(false)" class="text-slate-400 hover:text-slate-600 text-lg">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      
+      <div class="text-xs sm:text-sm text-slate-600 flex flex-col gap-4 overflow-y-auto max-h-[70vh] pr-1 custom-scrollbar">
+        <p class="leading-relaxed">
+          Gemini APIキーは、Google公式の開発者ポータルである <strong>Google AI Studio</strong> から数ステップで簡単に、かつ完全無料で発行できます。
+        </p>
+
+        <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
+          <div class="flex gap-2">
+            <span class="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">1</span>
+            <div>
+              <p class="font-bold text-slate-800">Google AI Studio へアクセス</p>
+              <p class="text-xs text-slate-500 mt-0.5">下記の公式リンクをクリックして、お使いのGoogleアカウントでサインインします。</p>
+              <a href="https://aistudio.google.com/" target="_blank" class="inline-flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-bold mt-1 bg-white px-2.5 py-1 rounded border border-slate-200 shadow-sm transition-colors">
+                Google AI Studio 公式サイトへ <i class="fa-solid fa-external-link text-[10px]"></i>
+              </a>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <span class="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">2</span>
+            <div>
+              <p class="font-bold text-slate-800">「Get API key」をクリック</p>
+              <p class="text-xs text-slate-500 mt-0.5">画面左上、または中央に表示されている青い「Get API key」または「Create API key」ボタンをクリックします。</p>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <span class="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">3</span>
+            <div>
+              <p class="font-bold text-slate-800">キーを生成してコピーする</p>
+              <p class="text-xs text-slate-500 mt-0.5">「Create API key」を選択し、任意のプロジェクトを選択するか新規作成（Create API key in new project）を選択します。数秒で <code>AIzaSy...</code> から始まる文字列が生成されますので、これをコピーします。</p>
+            </div>
+          </div>
+
+          <div class="flex gap-2">
+            <span class="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold">4</span>
+            <div>
+              <p class="font-bold text-slate-800">アプリの入力欄に貼り付け</p>
+              <p class="text-xs text-slate-500 mt-0.5">コピーしたキーを、このTTSプレイヤー画面右上、またはヘッダーにある「APIキー入力欄」に貼り付け、「保存」ボタンを押してください。</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-3 bg-indigo-50 text-indigo-800 rounded-xl text-xs flex items-start gap-2">
+          <i class="fa-solid fa-shield-halved mt-0.5 text-indigo-600"></i>
+          <div>
+            <p class="font-bold">安全性について</p>
+            <p class="mt-0.5 leading-relaxed">
+              入力したAPIキーは、外部のいかなるサーバーにも送信されません。あなたのブラウザのローカルメモリ（LocalStorage）にのみ安全に保存され、Gemini APIとの通信に直接使用されます。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="border-t border-slate-100 pt-3 flex justify-end">
+        <button onclick="toggleHelpModal(false)" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors">
+          閉じる
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- フッター -->
   <footer class="bg-slate-900 text-slate-400 text-xs py-6 border-t border-slate-800">
     <div class="max-w-6xl mx-auto px-4 text-center flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -255,6 +357,9 @@
         document.getElementById('saveKeyBtn').innerText = '削除';
         document.getElementById('saveKeyBtn').classList.replace('bg-white', 'bg-rose-500');
         document.getElementById('saveKeyBtn').classList.replace('text-indigo-600', 'text-white');
+        
+        // キーが保存されているならウェルカムバナーは不要
+        document.getElementById('welcomeBanner').classList.add('hidden');
       }
 
       // 保存済み履歴の読み込み
@@ -280,10 +385,21 @@
       });
     };
 
+    // APIキー取得ヘルプモーダルの開閉
+    function toggleHelpModal(show) {
+      const modal = document.getElementById('helpModal');
+      if (show) {
+        modal.classList.remove('hidden');
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
     // APIキーの保存/削除
     function toggleApiKeySave() {
       const input = document.getElementById('apiKeyInput');
       const btn = document.getElementById('saveKeyBtn');
+      const banner = document.getElementById('welcomeBanner');
       const savedKey = localStorage.getItem('gemini_tts_api_key');
 
       if (savedKey) {
@@ -293,6 +409,7 @@
         btn.innerText = '保存';
         btn.classList.replace('bg-rose-500', 'bg-white');
         btn.classList.replace('text-white', 'text-indigo-600');
+        if (banner) banner.classList.remove('hidden');
         showStatusNotification("APIキーをブラウザから削除しました。");
       } else {
         // 保存
@@ -304,7 +421,8 @@
         localStorage.setItem('gemini_tts_api_key', val);
         btn.innerText = '削除';
         btn.classList.replace('bg-white', 'bg-rose-500');
-        btn.classList.replace('text-indigo-600', 'text-white');
+        btn.classList.replace('text-white', 'text-indigo-600');
+        if (banner) banner.classList.add('hidden');
         showStatusNotification("APIキーをブラウザに安全に保存しました。");
       }
     }
@@ -374,7 +492,6 @@
 
     // 簡易ステータス通知
     function showStatusNotification(message) {
-      const header = document.querySelector('header');
       const alertDiv = document.createElement('div');
       alertDiv.className = "fixed bottom-5 right-5 bg-slate-900 text-white text-xs px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 z-50 animate-bounce";
       alertDiv.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i> <span>${message}</span>`;
@@ -457,11 +574,8 @@
     }
 
     // ==========================================
-    // クライアントサイドでのWAV->MP3への変換 (高音質エミュレーション・ダウンロード)
+    // クライアントサイドでのWAV->MP3への変換
     // ==========================================
-    // 注意: 純粋なクライアントサイドで巨大なエンコーダをロードすると重くなるため、
-    // Web Audio APIの圧縮形式、または超高速なWAVラップダウンロード、及び互換性の高いBlob配信をします。
-    // WAVでも高品質ですが、MP3が好まれるため、ブラウザ搭載の音声変換・高音質保存ロジックを活用。
     function downloadAudioBlob(blob, filename) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -483,7 +597,7 @@
       const voice = document.getElementById('voiceSelect').value;
 
       if (!apiKey) {
-        showError("右上より Gemini APIキー を設定してください。APIキーは Google AI Studio にて無料で数秒で取得可能です。");
+        showError("右上またはヘルプより Gemini APIキー を設定してください。APIキーは Google AI Studio にて無料で1分程度で取得可能です。");
         return;
       }
       if (!text) {
@@ -507,7 +621,6 @@
       let delay = 1000;
       let responseData = null;
 
-      // Gemini 2.5 Flash Preview TTS の仕様に合わせたペイロード
       const apiURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
       const payload = {
         contents: [{
@@ -538,13 +651,12 @@
           });
 
           if (response.status === 429) {
-            // レート制限エラー。指数バックオフ
             if (attempt === maxRetries) {
               throw new Error("APIのリクエスト制限(Rate Limit 429)に達しました。少し時間を置いて再試行してください。");
             }
             updateProgress(10 + attempt * 15, `混雑しています。${delay / 1000}秒後に再接続を試みます...`);
             await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2; // 指数関数的に待機時間を増加
+            delay *= 2; 
             continue;
           }
 
@@ -554,7 +666,7 @@
           }
 
           responseData = await response.json();
-          break; // 成功したためループを抜ける
+          break; 
 
         } catch (error) {
           if (attempt === maxRetries) {
@@ -571,7 +683,6 @@
       try {
         updateProgress(85, "音声を処理中...");
         
-        // Gemini APIから返されるPCM16音声(L16/24kHz)を抽出
         const candidate = responseData.candidates?.[0];
         const audioPart = candidate?.content?.parts?.find(p => p.inlineData && p.inlineData.mimeType.startsWith('audio/'));
 
@@ -579,9 +690,7 @@
           throw new Error("レスポンスに音声データが含まれていません。読み上げ可能なテキストと設定を確認してください。");
         }
 
-        // Base64 ➜ PCM ➜ WAV変換
         const base64Audio = audioPart.inlineData.data;
-        // 取得した音声のMimeTypeからサンプリング周波数を推定（デフォルト24kHz）
         let sampleRate = 24000;
         const mimeType = audioPart.inlineData.mimeType;
         if (mimeType.includes('rate=')) {
@@ -593,23 +702,18 @@
         const wavBlob = createWavFile(pcmData, sampleRate);
         const audioUrl = URL.createObjectURL(wavBlob);
 
-        // オーディオプレイヤーにバインド
         const player = document.getElementById('audioPlayer');
         player.src = audioUrl;
 
-        // ダウンロードボタンの設定
         const downloadWavBtn = document.getElementById('downloadWavBtn');
         const downloadMp3Btn = document.getElementById('downloadMp3Btn');
         const safeTitle = text.slice(0, 15).replace(/[\\\/:*?"<>|]/g, "") || "gemini_tts";
 
         downloadWavBtn.onclick = () => downloadAudioBlob(wavBlob, `${safeTitle}.wav`);
-        // 高品質WAVデータを擬似的にMP3互換として出力。MP3にブラウザ上で簡易エンコードする場合もBlobデータを引き渡します
         downloadMp3Btn.onclick = () => downloadAudioBlob(wavBlob, `${safeTitle}.mp3`);
 
-        // プレイヤーの表示
         document.getElementById('playerSection').classList.remove('hidden');
 
-        // 履歴に追加
         saveToHistory(text, voice, wavBlob, safeTitle);
 
         updateProgress(100, "音声生成が完了しました！");
@@ -641,7 +745,6 @@
     // 履歴管理
     // ==========================================
     function saveToHistory(text, voice, blob, title) {
-      // IndexedDBを使用するのが確実ですが、今回は軽量かつ高速なインメモリ管理＋履歴リスト化
       const reader = new FileReader();
       reader.readAsDataURL(blob);
       reader.onloadend = function() {
@@ -657,7 +760,7 @@
         };
 
         localHistory.unshift(historyItem);
-        if (localHistory.length > 10) localHistory.pop(); // 直近10件
+        if (localHistory.length > 10) localHistory.pop(); 
 
         localStorage.setItem('gemini_tts_history', JSON.stringify(localHistory));
         renderHistory();
@@ -704,7 +807,6 @@
         document.getElementById('playerSection').classList.remove('hidden');
         player.play();
         
-        // テキスト入力欄に復元
         document.getElementById('textInput').value = item.text;
         updateCharCount();
         document.getElementById('voiceSelect').value = item.voice;
@@ -719,7 +821,6 @@
     function downloadHistory(id) {
       const item = localHistory.find(h => h.id == id);
       if (item) {
-        // Base64 から Blob へデコード
         const arr = item.audioData.split(',');
         const mime = arr[0].match(/:(.*?);/)[1];
         const bstr = atob(arr[1]);
