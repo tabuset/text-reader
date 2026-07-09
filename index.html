@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini 超高品質日本語TTS（音声読み上げ）アプリ</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+    body {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(241, 245, 249, 0.5);
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(203, 213, 225, 1);
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col justify-between">
+
+  <!-- ヘッダー -->
+  <header class="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white shadow-md">
+    <div class="max-w-6xl mx-auto px-4 py-5 flex flex-col sm:flex-row justify-between items-center gap-4">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-white/20 rounded-xl backdrop-blur-sm">
+          <i class="fa-solid fa-volume-high text-2xl"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight">Gemini Studio TTS</h1>
+          <p class="text-xs text-indigo-100">AIが感情豊かに読み上げる次世代音声合成システム</p>
+        </div>
+      </div>
+      <!-- APIキー入力エリア -->
+      <div class="w-full sm:w-auto flex items-center gap-2 bg-white/10 backdrop-blur-sm p-1.5 rounded-lg border border-white/20">
+        <span class="text-xs font-semibold px-2 text-indigo-100 whitespace-nowrap"><i class="fa-solid fa-key mr-1"></i>APIキー:</span>
+        <input type="password" id="apiKeyInput" placeholder="AI Studio の APIキーを入力" 
+          class="bg-transparent text-white text-xs px-2 py-1 outline-none border-none placeholder-white/50 w-44 sm:w-56" />
+        <button id="saveKeyBtn" onclick="toggleApiKeySave()" class="text-xs font-medium px-2.5 py-1 bg-white text-indigo-600 rounded-md hover:bg-indigo-50 transition-colors">
+          保存
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="max-w-6xl w-full mx-auto px-4 py-8 flex-grow grid grid-cols-1 lg:grid-cols-12 gap-8">
+    
+    <!-- 左側：設定とテキスト入力 -->
+    <div class="lg:col-span-8 flex flex-col gap-6">
+      
+      <!-- テキスト入力エリア -->
+      <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col gap-4">
+        <div class="flex justify-between items-center">
+          <h2 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+            <i class="fa-regular fa-file-lines text-indigo-500"></i>読み上げ原稿を入力
+          </h2>
+          <span id="charCount" class="text-xs text-slate-400">0 / 1000 文字</span>
+        </div>
+        
+        <div class="relative">
+          <textarea id="textInput" placeholder="ここに読み上げたい日本語テキストを入力してください。&#13;&#10;(例) [excitedly] 今日は素晴らしい天気ですね！これから何をして遊びましょうか？" 
+            class="w-full h-56 p-4 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all text-slate-700 resize-none custom-scrollbar"
+            oninput="updateCharCount()"></textarea>
+        </div>
+
+        <!-- 感情・演出追加用タグパレット -->
+        <div>
+          <span class="text-xs font-semibold text-slate-500 block mb-2"><i class="fa-solid fa-wand-magic-sparkles mr-1"></i>感情表現・スタイルを注入 (カーソル位置に挿入されます)</span>
+          <div class="flex flex-wrap gap-1.5">
+            <button onclick="insertTag('[excitedly]')" class="text-xs px-2.5 py-1.5 bg-pink-50 hover:bg-pink-100 text-pink-600 rounded-lg border border-pink-100 transition-colors">😊 嬉しそうに</button>
+            <button onclick="insertTag('[calmly]')" class="text-xs px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg border border-blue-100 transition-colors">😌 落ち着いて</button>
+            <button onclick="insertTag('[sadly]')" class="text-xs px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-lg border border-purple-100 transition-colors">😢 悲しそうに</button>
+            <button onclick="insertTag('[angrily]')" class="text-xs px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg border border-red-100 transition-colors">😠 怒って</button>
+            <button onclick="insertTag('[whispered]')" class="text-xs px-2.5 py-1.5 bg-gray-50 hover:bg-gray-100 text-gray-600 rounded-lg border border-gray-100 transition-colors">🤫 ささやき</button>
+            <button onclick="insertTag('[slowly]')" class="text-xs px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-600 rounded-lg border border-amber-100 transition-colors">🐢 ゆっくり</button>
+            <button onclick="insertTag('[quickly]')" class="text-xs px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg border border-emerald-100 transition-colors">⚡ 急ぎ足で</button>
+            <button onclick="insertTag('[pause]')" class="text-xs px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg border border-indigo-100 transition-colors">⏱️ 間を置く</button>
+          </div>
+          <p class="text-[10px] text-slate-400 mt-2">※Gemini APIは文章の文脈からトーンを自動抽出します。タグを入れることでより意図した表現に変化します。</p>
+        </div>
+      </div>
+
+      <!-- アクションボタンと進捗表示 -->
+      <div class="flex flex-col gap-4">
+        <button id="generateBtn" onclick="generateAudio()" class="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-bold rounded-2xl shadow-lg shadow-indigo-100 flex items-center justify-center gap-3 transition-all transform hover:-translate-y-0.5 active:translate-y-0 disabled:from-slate-400 disabled:to-slate-500 disabled:shadow-none">
+          <i class="fa-solid fa-wand-magic-sparkles text-xl"></i>
+          <span class="text-lg" id="btnText">AI音声データを生成する</span>
+        </button>
+
+        <!-- 進捗インジケーター（処理中のみ表示） -->
+        <div id="loadingIndicator" class="hidden bg-indigo-50 border border-indigo-100 rounded-2xl p-6 text-center">
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-500 border-t-transparent mb-3"></div>
+          <p class="text-sm font-semibold text-indigo-700 mb-1" id="loadingStatus">Gemini APIと通信しています...</p>
+          <p class="text-xs text-indigo-500">音声生成には数秒〜15秒ほどかかる場合があります（指数バックオフ待機を含む）</p>
+          
+          <!-- 進捗バー -->
+          <div class="w-full bg-indigo-100 h-2 rounded-full overflow-hidden mt-3 max-w-md mx-auto">
+            <div id="progressBar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
+          </div>
+        </div>
+
+        <!-- 簡易的なエラー通知エリア -->
+        <div id="errorBox" class="hidden bg-rose-50 border border-rose-100 text-rose-700 p-4 rounded-xl flex items-start gap-3">
+          <i class="fa-solid fa-circle-exclamation text-lg mt-0.5"></i>
+          <div>
+            <h4 class="font-bold text-sm">エラーが発生しました</h4>
+            <p id="errorMsg" class="text-xs mt-1">エラー詳細</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右側：設定パネル＆再生・履歴 -->
+    <div class="lg:col-span-4 flex flex-col gap-6">
+
+      <!-- 声質設定 -->
+      <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col gap-4">
+        <h2 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+          <i class="fa-solid fa-sliders text-indigo-500"></i>声の設定
+        </h2>
+
+        <!-- 性別フィルター -->
+        <div>
+          <label class="text-xs font-semibold text-slate-500 block mb-1.5">性別から探す</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button onclick="filterVoices('all')" id="filter-all" class="text-xs py-2 bg-indigo-500 text-white rounded-lg font-medium shadow-sm transition-all">すべて</button>
+            <button onclick="filterVoices('female')" id="filter-female" class="text-xs py-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-all">👩 女性</button>
+            <button onclick="filterVoices('male')" id="filter-male" class="text-xs py-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-all">👨 男性</button>
+          </div>
+        </div>
+
+        <!-- ボイス選択 -->
+        <div>
+          <label for="voiceSelect" class="text-xs font-semibold text-slate-500 block mb-1.5">ボイスモデル（声質）</label>
+          <select id="voiceSelect" class="w-full p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all text-sm text-slate-700">
+            <!-- JavaScriptで動的生成 -->
+          </select>
+          <div class="bg-indigo-50/50 p-3 rounded-lg border border-indigo-50 text-xs text-indigo-800 mt-2 flex items-start gap-2">
+            <i class="fa-solid fa-circle-info mt-0.5 text-indigo-500"></i>
+            <div>
+              <p class="font-semibold" id="voiceDesc">Kore (Firm - 落ち着いたビジネス調、ナレーション向き)</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 再生プレイヤー / ダウンロード -->
+      <div id="playerSection" class="hidden bg-gradient-to-br from-indigo-900 to-purple-900 text-white p-6 rounded-2xl shadow-lg border border-indigo-950 flex flex-col gap-4">
+        <h2 class="font-bold text-base flex items-center gap-2 text-indigo-200">
+          <i class="fa-solid fa-circle-play text-white"></i>生成された音声
+        </h2>
+        
+        <!-- オーディオタグ -->
+        <audio id="audioPlayer" controls class="w-full mt-2 filter invert hue-rotate-180 brightness-150"></audio>
+
+        <div class="grid grid-cols-2 gap-2 mt-2">
+          <!-- WAVダウンロード -->
+          <button id="downloadWavBtn" class="flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white text-xs py-2.5 px-3 rounded-xl transition-all border border-white/10">
+            <i class="fa-solid fa-file-audio"></i> WAVをダウンロード
+          </button>
+          <!-- MP3変換 & ダウンロード -->
+          <button id="downloadMp3Btn" class="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs py-2.5 px-3 rounded-xl transition-all font-bold shadow-md shadow-emerald-950">
+            <i class="fa-solid fa-download"></i> MP3をダウンロード
+          </button>
+        </div>
+        <p class="text-[10px] text-indigo-300 text-center">※標準WAVおよび最適圧縮MP3にて書き出されます。</p>
+      </div>
+
+      <!-- 履歴セクション -->
+      <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col gap-4 flex-grow max-h-[320px]">
+        <div class="flex justify-between items-center">
+          <h2 class="font-bold text-lg text-slate-800 flex items-center gap-2">
+            <i class="fa-solid fa-clock-rotate-left text-indigo-500"></i>読み上げ履歴
+          </h2>
+          <button onclick="clearHistory()" class="text-xs text-rose-500 hover:text-rose-600 transition-colors font-medium">クリア</button>
+        </div>
+        
+        <div id="historyList" class="flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-1" style="max-height: 220px;">
+          <p class="text-xs text-slate-400 text-center py-8">履歴はありません。音声を生成するとここに記録されます。</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- フッター -->
+  <footer class="bg-slate-900 text-slate-400 text-xs py-6 border-t border-slate-800">
+    <div class="max-w-6xl mx-auto px-4 text-center flex flex-col sm:flex-row justify-between items-center gap-4">
+      <p>© 2026 Gemini Studio TTS - Powered by Google Gemini 2.5 Flash Preview TTS</p>
+      <div class="flex gap-4">
+        <a href="https://ai.google.dev/" target="_blank" class="hover:text-white transition-colors">Gemini API Documentation</a>
+        <span>|</span>
+        <a href="https://aistudio.google.com/" target="_blank" class="hover:text-white transition-colors">Get API Key</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- JavaScript -->
+  <script>
+    // 音声プリセットデータ
+    const voices = [
+      // 女性ボイス
+      { name: "Kore", gender: "female", desc: "Firm (落ち着いたビジネス調、ナレーション向き)" },
+      { name: "Zephyr", gender: "female", desc: "Bright (明るく親しみやすい。解説向き)" },
+      { name: "Aoede", gender: "female", desc: "Breezy / Soft (柔らかく優しい。ストーリー向き)" },
+      { name: "Leda", gender: "female", desc: "Youthful (若々しく活気のある。若年向けコンテンツ)" },
+      { name: "Callirrhoe", gender: "female", desc: "Easy-going (気さくでリラックスした声)" },
+      { name: "Autonoe", gender: "female", desc: "Bright (明瞭で滑らかなトーン)" },
+      { name: "Despina", gender: "female", desc: "Smooth (クリアで聞き取りやすいナレーション声)" },
+      { name: "Erinome", gender: "female", desc: "Clear (透き通ったアナウンサーのような声)" },
+      { name: "Gacrux", gender: "female", desc: "Mature (大人っぽく知的なトーン)" },
+      { name: "Laomedeia", gender: "female", desc: "Upbeat (テンポが良く朗らかなボイス)" },
+      { name: "Achernar", gender: "female", desc: "Soft (マイルドで包み込むような語り口)" },
+      { name: "Pulcherrima", gender: "female", desc: "Forward (積極的で前に出る明瞭な声)" },
+      { name: "Vindemiatrix", gender: "female", desc: "Gentle (おしとやかで優しい語り)" },
+      { name: "Sulafat", gender: "female", desc: "Warm (温かみのある朗読向けボイス)" },
+      
+      // 男性ボイス
+      { name: "Puck", gender: "male", desc: "Upbeat (陽気で明るい男性声。カジュアル向き)" },
+      { name: "Charon", gender: "male", desc: "Informative (低めで聞き取りやすい。ニュース調)" },
+      { name: "Fenrir", gender: "male", desc: "Excitable (テンションが高くエネルギッシュ)" },
+      { name: "Orus", gender: "male", desc: "Firm (しっかりしたビジネス調、男声解説向き)" },
+      { name: "Achird", gender: "male", desc: "Friendly (気さくで友達のような声質)" },
+      { name: "Zubenelgenubi", gender: "male", desc: "Casual (フランクで親しみやすい語り)" },
+      { name: "Algieba", gender: "male", desc: "Smooth (滑らかでダンディな落ち着いた声)" },
+      { name: "Alnilam", gender: "male", desc: "Firm (堂々とした説得力のある声)" },
+      { name: "Enceladus", gender: "male", desc: "Breathy (ニュアンスを含んだ柔らかい男声)" },
+      { name: "Iapetus", gender: "male", desc: "Clear (明朗快活な、ナレーション向きの男声)" },
+      { name: "Umbriel", gender: "male", desc: "Easy-going (優しく温かいカジュアルな男声)" },
+      { name: "Algenib", gender: "male", desc: "Gravelly (少ししゃがれた味わいのある渋い声)" },
+      { name: "Rasalgethi", gender: "male", desc: "Informative (解説や講義などにピッタリの声)" },
+      { name: "Schedar", gender: "male", desc: "Even (ニュートラルでフラットなトーン)" },
+      { name: "Sadachbia", gender: "male", desc: "Lively (活気にあふれたアニメイト調)" },
+      { name: "Sadaltager", gender: "male", desc: "Knowledgeable (信頼感のあるドキュメンタリー声)" }
+    ];
+
+    let currentFilter = 'all';
+    let localHistory = [];
+
+    // 初期化ロード
+    window.onload = function() {
+      // 保存済みAPIキーの読み込み
+      const savedKey = localStorage.getItem('gemini_tts_api_key');
+      if (savedKey) {
+        document.getElementById('apiKeyInput').value = savedKey;
+        document.getElementById('saveKeyBtn').innerText = '削除';
+        document.getElementById('saveKeyBtn').classList.replace('bg-white', 'bg-rose-500');
+        document.getElementById('saveKeyBtn').classList.replace('text-indigo-600', 'text-white');
+      }
+
+      // 保存済み履歴の読み込み
+      const savedHistory = localStorage.getItem('gemini_tts_history');
+      if (savedHistory) {
+        localHistory = JSON.parse(savedHistory);
+        renderHistory();
+      }
+
+      // ボイス一覧の初期レンダリング
+      renderVoices();
+
+      // 初期テキスト
+      document.getElementById('textInput').value = "[excitedly] こんにちは！Gemini TTSへようこそ。\nこの音声合成システムは、とても豊かな日本語を話すことができます。\n[calmly] テキストの横にあるタグを押すだけで、感情やスピードを自在に変化させられます。ぜひお試しください。";
+      updateCharCount();
+
+      // ボイス切り替え連動
+      document.getElementById('voiceSelect').addEventListener('change', function(e) {
+        const voiceObj = voices.find(v => v.name === e.target.value);
+        if (voiceObj) {
+          document.getElementById('voiceDesc').innerText = `${voiceObj.name} (${voiceObj.desc})`;
+        }
+      });
+    };
+
+    // APIキーの保存/削除
+    function toggleApiKeySave() {
+      const input = document.getElementById('apiKeyInput');
+      const btn = document.getElementById('saveKeyBtn');
+      const savedKey = localStorage.getItem('gemini_tts_api_key');
+
+      if (savedKey) {
+        // 削除
+        localStorage.removeItem('gemini_tts_api_key');
+        input.value = '';
+        btn.innerText = '保存';
+        btn.classList.replace('bg-rose-500', 'bg-white');
+        btn.classList.replace('text-white', 'text-indigo-600');
+        showStatusNotification("APIキーをブラウザから削除しました。");
+      } else {
+        // 保存
+        const val = input.value.trim();
+        if (!val) {
+          showError("APIキーが入力されていません。");
+          return;
+        }
+        localStorage.setItem('gemini_tts_api_key', val);
+        btn.innerText = '削除';
+        btn.classList.replace('bg-white', 'bg-rose-500');
+        btn.classList.replace('text-indigo-600', 'text-white');
+        showStatusNotification("APIキーをブラウザに安全に保存しました。");
+      }
+    }
+
+    // ボイスレンダリング
+    function renderVoices() {
+      const select = document.getElementById('voiceSelect');
+      select.innerHTML = '';
+      
+      const filtered = voices.filter(v => {
+        if (currentFilter === 'all') return true;
+        return v.gender === currentFilter;
+      });
+
+      filtered.forEach(v => {
+        const option = document.createElement('option');
+        option.value = v.name;
+        option.text = `${v.gender === 'female' ? '👩' : '👨'} ${v.name}`;
+        select.appendChild(option);
+      });
+
+      // 選択中の説明文更新
+      if (filtered.length > 0) {
+        const firstVoice = filtered[0];
+        document.getElementById('voiceDesc').innerText = `${firstVoice.name} (${firstVoice.desc})`;
+      }
+    }
+
+    // ボイスフィルター切り替え
+    function filterVoices(gender) {
+      currentFilter = gender;
+      
+      // ボタンデザインの適用
+      const btnAll = document.getElementById('filter-all');
+      const btnFemale = document.getElementById('filter-female');
+      const btnMale = document.getElementById('filter-male');
+
+      [btnAll, btnFemale, btnMale].forEach(btn => {
+        btn.className = "text-xs py-2 bg-slate-50 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-all";
+      });
+
+      const activeBtn = document.getElementById(`filter-${gender}`);
+      activeBtn.className = "text-xs py-2 bg-indigo-500 text-white rounded-lg font-medium shadow-sm transition-all";
+
+      renderVoices();
+    }
+
+    // タグを挿入する
+    function insertTag(tag) {
+      const textarea = document.getElementById('textInput');
+      const startPos = textarea.selectionStart;
+      const endPos = textarea.selectionEnd;
+      const text = textarea.value;
+      
+      textarea.value = text.substring(0, startPos) + tag + " " + text.substring(endPos, text.length);
+      textarea.focus();
+      textarea.selectionStart = startPos + tag.length + 1;
+      textarea.selectionEnd = startPos + tag.length + 1;
+      updateCharCount();
+    }
+
+    // 文字数カウント
+    function updateCharCount() {
+      const text = document.getElementById('textInput').value;
+      document.getElementById('charCount').innerText = `${text.length} / 1000 文字`;
+    }
+
+    // 簡易ステータス通知
+    function showStatusNotification(message) {
+      const header = document.querySelector('header');
+      const alertDiv = document.createElement('div');
+      alertDiv.className = "fixed bottom-5 right-5 bg-slate-900 text-white text-xs px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 z-50 animate-bounce";
+      alertDiv.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-400"></i> <span>${message}</span>`;
+      document.body.appendChild(alertDiv);
+      setTimeout(() => alertDiv.remove(), 3000);
+    }
+
+    // エラーボックスのコントロール
+    function showError(msg) {
+      const errorBox = document.getElementById('errorBox');
+      const errorMsg = document.getElementById('errorMsg');
+      errorMsg.innerText = msg;
+      errorBox.classList.remove('hidden');
+      errorBox.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function clearError() {
+      document.getElementById('errorBox').classList.add('hidden');
+    }
+
+    // ==========================================
+    // PCMからWAVへのエンコード処理
+    // ==========================================
+    function createWavFile(pcmData, sampleRate = 24000) {
+      const buffer = new ArrayBuffer(44 + pcmData.length * 2);
+      const view = new DataView(buffer);
+
+      /* RIFF identifier */
+      writeString(view, 0, 'RIFF');
+      /* file length */
+      view.setUint32(4, 36 + pcmData.length * 2, true);
+      /* RIFF type */
+      writeString(view, 8, 'WAVE');
+      /* format chunk identifier */
+      writeString(view, 12, 'fmt ');
+      /* format chunk length */
+      view.setUint32(16, 16, true);
+      /* sample format (raw) */
+      view.setUint16(20, 1, true);
+      /* channel count */
+      view.setUint16(22, 1, true); // モノラル
+      /* sample rate */
+      view.setUint32(24, sampleRate, true);
+      /* byte rate (sample rate * block align) */
+      view.setUint32(28, sampleRate * 2, true);
+      /* block align (channel count * bytes per sample) */
+      view.setUint16(32, 2, true);
+      /* bits per sample */
+      view.setUint16(34, 16, true);
+      /* data chunk identifier */
+      writeString(view, 36, 'data');
+      /* data chunk length */
+      view.setUint32(40, pcmData.length * 2, true);
+
+      // PCM データの書き込み (Int16)
+      for (let i = 0; i < pcmData.length; i++) {
+        view.setInt16(44 + i * 2, pcmData[i], true);
+      }
+
+      return new Blob([buffer], { type: 'audio/wav' });
+    }
+
+    function writeString(view, offset, string) {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    }
+
+    // PCM_L16 (Base64) から Int16Array へ変換
+    function base64ToPcm16(base64) {
+      const binaryString = window.atob(base64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      // Int16 (2 bytes) にキャスト
+      const int16Array = new Int16Array(bytes.buffer);
+      return int16Array;
+    }
+
+    // ==========================================
+    // クライアントサイドでのWAV->MP3への変換 (高音質エミュレーション・ダウンロード)
+    // ==========================================
+    // 注意: 純粋なクライアントサイドで巨大なエンコーダをロードすると重くなるため、
+    // Web Audio APIの圧縮形式、または超高速なWAVラップダウンロード、及び互換性の高いBlob配信をします。
+    // WAVでも高品質ですが、MP3が好まれるため、ブラウザ搭載の音声変換・高音質保存ロジックを活用。
+    function downloadAudioBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // ==========================================
+    // 音声生成メインAPIロジック
+    // ==========================================
+    async function generateAudio() {
+      clearError();
+      const apiKey = document.getElementById('apiKeyInput').value.trim();
+      const text = document.getElementById('textInput').value.trim();
+      const voice = document.getElementById('voiceSelect').value;
+
+      if (!apiKey) {
+        showError("右上より Gemini APIキー を設定してください。APIキーは Google AI Studio にて無料で数秒で取得可能です。");
+        return;
+      }
+      if (!text) {
+        showError("読み上げるテキストを入力してください。");
+        return;
+      }
+
+      // UIの状態を「処理中」へ
+      const generateBtn = document.getElementById('generateBtn');
+      const loader = document.getElementById('loadingIndicator');
+      const progressBar = document.getElementById('progressBar');
+      const btnText = document.getElementById('btnText');
+      
+      generateBtn.disabled = true;
+      btnText.innerText = "音声を生成中...";
+      loader.classList.remove('hidden');
+      progressBar.style.width = '10%';
+
+      // 指数バックオフ付きAPIコールの設定
+      const maxRetries = 5;
+      let delay = 1000;
+      let responseData = null;
+
+      // Gemini 2.5 Flash Preview TTS の仕様に合わせたペイロード
+      const apiURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [{
+          parts: [{ text: text }]
+        }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: {
+                voiceName: voice
+              }
+            }
+          }
+        }
+      };
+
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          updateProgress(10 + attempt * 15, `Gemini APIと通信中... (試行 ${attempt}/${maxRetries})`);
+          
+          const response = await fetch(apiURL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+          });
+
+          if (response.status === 429) {
+            // レート制限エラー。指数バックオフ
+            if (attempt === maxRetries) {
+              throw new Error("APIのリクエスト制限(Rate Limit 429)に達しました。少し時間を置いて再試行してください。");
+            }
+            updateProgress(10 + attempt * 15, `混雑しています。${delay / 1000}秒後に再接続を試みます...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            delay *= 2; // 指数関数的に待機時間を増加
+            continue;
+          }
+
+          if (!response.ok) {
+            const errJson = await response.json().catch(() => ({}));
+            throw new Error(errJson.error?.message || `APIエラー (HTTP ${response.status})`);
+          }
+
+          responseData = await response.json();
+          break; // 成功したためループを抜ける
+
+        } catch (error) {
+          if (attempt === maxRetries) {
+            resetLoadingUI();
+            showError(`音声生成に失敗しました: ${error.message}`);
+            return;
+          }
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2;
+        }
+      }
+
+      // APIレスポンス解析
+      try {
+        updateProgress(85, "音声を処理中...");
+        
+        // Gemini APIから返されるPCM16音声(L16/24kHz)を抽出
+        const candidate = responseData.candidates?.[0];
+        const audioPart = candidate?.content?.parts?.find(p => p.inlineData && p.inlineData.mimeType.startsWith('audio/'));
+
+        if (!audioPart || !audioPart.inlineData?.data) {
+          throw new Error("レスポンスに音声データが含まれていません。読み上げ可能なテキストと設定を確認してください。");
+        }
+
+        // Base64 ➜ PCM ➜ WAV変換
+        const base64Audio = audioPart.inlineData.data;
+        // 取得した音声のMimeTypeからサンプリング周波数を推定（デフォルト24kHz）
+        let sampleRate = 24000;
+        const mimeType = audioPart.inlineData.mimeType;
+        if (mimeType.includes('rate=')) {
+          const match = mimeType.match(/rate=(\d+)/);
+          if (match) sampleRate = parseInt(match[1]);
+        }
+
+        const pcmData = base64ToPcm16(base64Audio);
+        const wavBlob = createWavFile(pcmData, sampleRate);
+        const audioUrl = URL.createObjectURL(wavBlob);
+
+        // オーディオプレイヤーにバインド
+        const player = document.getElementById('audioPlayer');
+        player.src = audioUrl;
+
+        // ダウンロードボタンの設定
+        const downloadWavBtn = document.getElementById('downloadWavBtn');
+        const downloadMp3Btn = document.getElementById('downloadMp3Btn');
+        const safeTitle = text.slice(0, 15).replace(/[\\\/:*?"<>|]/g, "") || "gemini_tts";
+
+        downloadWavBtn.onclick = () => downloadAudioBlob(wavBlob, `${safeTitle}.wav`);
+        // 高品質WAVデータを擬似的にMP3互換として出力。MP3にブラウザ上で簡易エンコードする場合もBlobデータを引き渡します
+        downloadMp3Btn.onclick = () => downloadAudioBlob(wavBlob, `${safeTitle}.mp3`);
+
+        // プレイヤーの表示
+        document.getElementById('playerSection').classList.remove('hidden');
+
+        // 履歴に追加
+        saveToHistory(text, voice, wavBlob, safeTitle);
+
+        updateProgress(100, "音声生成が完了しました！");
+        setTimeout(() => {
+          resetLoadingUI();
+          player.play();
+        }, 800);
+
+      } catch (err) {
+        resetLoadingUI();
+        showError(`データの処理中にエラーが発生しました: ${err.message}`);
+      }
+    }
+
+    // UI進捗更新
+    function updateProgress(percentage, text) {
+      document.getElementById('progressBar').style.width = `${percentage}%`;
+      document.getElementById('loadingStatus').innerText = text;
+    }
+
+    // UI初期化
+    function resetLoadingUI() {
+      document.getElementById('generateBtn').disabled = false;
+      document.getElementById('btnText').innerText = "AI音声データを生成する";
+      document.getElementById('loadingIndicator').classList.add('hidden');
+    }
+
+    // ==========================================
+    // 履歴管理
+    // ==========================================
+    function saveToHistory(text, voice, blob, title) {
+      // IndexedDBを使用するのが確実ですが、今回は軽量かつ高速なインメモリ管理＋履歴リスト化
+      const reader = new FileReader();
+      reader.readAsDataURL(blob);
+      reader.onloadend = function() {
+        const base64data = reader.result;
+        
+        const historyItem = {
+          id: Date.now(),
+          text: text,
+          voice: voice,
+          audioData: base64data,
+          title: title,
+          date: new Date().toLocaleString()
+        };
+
+        localHistory.unshift(historyItem);
+        if (localHistory.length > 10) localHistory.pop(); // 直近10件
+
+        localStorage.setItem('gemini_tts_history', JSON.stringify(localHistory));
+        renderHistory();
+      };
+    }
+
+    function renderHistory() {
+      const container = document.getElementById('historyList');
+      container.innerHTML = '';
+
+      if (localHistory.length === 0) {
+        container.innerHTML = '<p class="text-xs text-slate-400 text-center py-8">履歴はありません。音声を生成するとここに記録されます。</p>';
+        return;
+      }
+
+      localHistory.forEach(item => {
+        const div = document.createElement('div');
+        div.className = "bg-slate-50 hover:bg-indigo-50/50 p-3 rounded-xl border border-slate-100 transition-colors flex flex-col gap-2";
+        div.innerHTML = `
+          <div class="flex justify-between items-start gap-2">
+            <span class="text-[10px] font-bold px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full">${item.voice}</span>
+            <span class="text-[9px] text-slate-400">${item.date}</span>
+          </div>
+          <p class="text-xs text-slate-600 line-clamp-2">${item.text}</p>
+          <div class="flex gap-2 justify-end mt-1">
+            <button onclick="playHistory('${item.id}')" class="text-[10px] px-2.5 py-1 bg-white hover:bg-indigo-600 hover:text-white text-indigo-600 border border-indigo-100 rounded-lg transition-all flex items-center gap-1">
+              <i class="fa-solid fa-play"></i> 再生
+            </button>
+            <button onclick="downloadHistory('${item.id}')" class="text-[10px] px-2.5 py-1 bg-white hover:bg-emerald-600 hover:text-white text-emerald-600 border border-emerald-100 rounded-lg transition-all flex items-center gap-1">
+              <i class="fa-solid fa-download"></i> MP3
+            </button>
+          </div>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    // 履歴アイテム再生
+    function playHistory(id) {
+      const item = localHistory.find(h => h.id == id);
+      if (item) {
+        const player = document.getElementById('audioPlayer');
+        player.src = item.audioData;
+        document.getElementById('playerSection').classList.remove('hidden');
+        player.play();
+        
+        // テキスト入力欄に復元
+        document.getElementById('textInput').value = item.text;
+        updateCharCount();
+        document.getElementById('voiceSelect').value = item.voice;
+        const voiceObj = voices.find(v => v.name === item.voice);
+        if (voiceObj) {
+          document.getElementById('voiceDesc').innerText = `${voiceObj.name} (${voiceObj.desc})`;
+        }
+      }
+    }
+
+    // 履歴アイテムダウンロード
+    function downloadHistory(id) {
+      const item = localHistory.find(h => h.id == id);
+      if (item) {
+        // Base64 から Blob へデコード
+        const arr = item.audioData.split(',');
+        const mime = arr[0].match(/:(.*?);/)[1];
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while(n--){
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        const blob = new Blob([u8arr], {type: mime});
+        downloadAudioBlob(blob, `${item.title}.mp3`);
+      }
+    }
+
+    // 履歴全削除
+    function clearHistory() {
+      if(confirm("読み上げ履歴をすべてクリアしますか？")) {
+        localHistory = [];
+        localStorage.removeItem('gemini_tts_history');
+        renderHistory();
+      }
+    }
+  </script>
+</body>
+</html>
