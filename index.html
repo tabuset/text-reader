@@ -92,11 +92,11 @@
           <h2 class="font-bold text-lg text-slate-800 flex items-center gap-2">
             <i class="fa-regular fa-file-lines text-indigo-500"></i>読み上げ原稿を入力
           </h2>
-          <span id="charCount" class="text-xs text-slate-400">0 / 1000 文字</span>
+          <span id="charCount" class="text-xs text-slate-400">0 / 5000 文字</span>
         </div>
         
         <div class="relative">
-          <textarea id="textInput" placeholder="ここに読み上げたい日本語テキストを入力してください。&#13;&#10;(例) [excitedly] 今日は素晴らしい天気ですね！これから何をして遊びましょうか？" 
+          <textarea id="textInput" maxlength="5000" placeholder="ここに読み上げたい日本語テキストを入力してください。最大5,000文字まで一度に生成できます。&#13;&#10;(例) [excitedly] 今日は素晴らしい天気ですね！これから何をして遊びましょうか？" 
             class="w-full h-56 p-4 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all text-slate-700 resize-none custom-scrollbar"
             oninput="updateCharCount()"></textarea>
         </div>
@@ -335,7 +335,7 @@
       { name: "Zubenelgenubi", gender: "male", desc: "Casual (フランクで親しみやすい語り)" },
       { name: "Algieba", gender: "male", desc: "Smooth (滑らかでダンディな落ち着いた声)" },
       { name: "Alnilam", gender: "male", desc: "Firm (堂々とした説得力のある声)" },
-      { name: "Enceladus", gender: "male", desc: "Breathy (ニュアンスを含んだ柔らかい男声)" },
+      { name: "Enceladus", gender: "male", desc: "Breathy (ニュースを含んだ柔らかい男声)" },
       { name: "Iapetus", gender: "male", desc: "Clear (明朗快活な、ナレーション向きの男声)" },
       { name: "Umbriel", gender: "male", desc: "Easy-going (優しく温かいカジュアルな男声)" },
       { name: "Algenib", gender: "male", desc: "Gravelly (少ししゃがれた味わいのある渋い声)" },
@@ -484,10 +484,10 @@
       updateCharCount();
     }
 
-    // 文字数カウント
+    // 文字数カウント (上限5000文字に対応)
     function updateCharCount() {
       const text = document.getElementById('textInput').value;
-      document.getElementById('charCount').innerText = `${text.length} / 1000 文字`;
+      document.getElementById('charCount').innerText = `${text.length} / 5000 文字`;
     }
 
     // 簡易ステータス通知
@@ -555,6 +555,7 @@
       return new Blob([buffer], { type: 'audio/wav' });
     }
 
+    // 文字列書き込みヘルパー
     function writeString(view, offset, string) {
       for (let i = 0; i < string.length; i++) {
         view.setUint8(offset + i, string.charCodeAt(i));
@@ -574,9 +575,7 @@
       return int16Array;
     }
 
-    // ==========================================
-    // クライアントサイドでのWAV->MP3への変換
-    // ==========================================
+    // クライアントサイドでのWAV->MP3への変換ダウンロード
     function downloadAudioBlob(blob, filename) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -589,7 +588,7 @@
     }
 
     // ==========================================
-    // 音声生成メインAPIロジック (APIエンドポイントおよびモデル名を修正)
+    // 音声生成メインAPIロジック
     // ==========================================
     async function generateAudio() {
       clearError();
