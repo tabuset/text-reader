@@ -168,7 +168,7 @@
           <p class="text-sm font-semibold text-indigo-700 mb-1" id="loadingStatus">準備中...</p>
           <p class="text-xs text-indigo-500 leading-relaxed">
             長文は自動的に分割して個別に生成し、最後に1本の音声に結合（マージ）します。<br>
-            API制限を回避しながら安全に処理するため、しばらくお待ちください。
+            無料版APIキーの制限を回避するため、安全な時間間隔を空けながらリクエストします。
           </p>
           
           <!-- 進捗バー -->
@@ -777,7 +777,7 @@
     }
 
     // ==========================================
-    // 音声生成メインAPIロジック (長文自動・手動分割結合対応版)
+    // 音声生成メインAPIロジック (長文自動・手動分割結合 + API 429 回避強化)
     // ==========================================
     async function generateAudio() {
       clearError();
@@ -860,7 +860,7 @@
 
           // 各チャンクに対して指数バックオフ付きでリクエスト
           const maxRetries = 5;
-          let delay = 1000;
+          let delay = 3000; // 初期待機時間を3秒に引き上げてレート制限(429)解除をしっかり待つように強化
           let success = false;
           let responseData = null;
 
@@ -876,11 +876,18 @@
 
               if (response.status === 429) {
                 if (attempt === maxRetries) {
-                  throw new Error("リクエストの制限(429)を超過しました。しばらく時間をおいて再実行してください。");
+                  throw new Error("APIのリクエスト制限(429)を超過しました。分割数を減らすか、APIキーの制限解除のため1分ほど置いてから再度お試しください。");
                 }
-                chunkText.innerText = `現在API混雑中。${delay / 1000}秒待機してからリクエストを再試行します...`;
-                await new Promise(resolve => setTimeout(resolve, delay));
-                delay *= 2;
+                
+                // カウントダウン付きの待機状態に更新
+                let countdown = Math.round(delay / 1000);
+                while (countdown > 0) {
+                  chunkText.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>API制限を回避中... あと ${countdown} 秒で自動再接続します (試行 ${attempt}/${maxRetries})</span>`;
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                  countdown--;
+                }
+                
+                delay *= 2; // 次回のリトライ待機時間を2倍に増幅
                 continue;
               }
 
@@ -924,8 +931,12 @@
           const pcmPart = base64ToPcm16(base64Audio);
           pcmArrays.push(pcmPart);
 
+          // 無料APIキーの制限をスマートに回避するため、連続リクエスト間に安全なセーフウェイトを挟む
+          // パート数が3以上のときは、API制限にかかりやすいため、長めのウェイト(1.8秒)を設定
           if (totalChunks > 1 && idx < totalChunks - 1) {
-            await new Promise(resolve => setTimeout(resolve, 300));
+            const safetyWaitTime = totalChunks >= 3 ? 1800 : 800;
+            chunkText.innerText = `次のパートの生成を安全に準備中...`;
+            await new Promise(resolve => setTimeout(resolve, safetyWaitTime));
           }
         }
 
