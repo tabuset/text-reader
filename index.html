@@ -941,7 +941,7 @@
         }
 
         updateProgress(90, "すべての音声パーツをシームレスに結合しています...");
-        chunkText.innerText = `結合処理: 合計 ${totalChunks} 個の音声パーツを高速連結中...`;
+        chunkText.innerText = `結合処理: 合計 ${totalChunks} 個 of 音声パーツを高速連結中...`;
 
         const mergedPcm = concatenateInt16Arrays(pcmArrays);
         const wavBlob = createWavFile(mergedPcm, sampleRate);
