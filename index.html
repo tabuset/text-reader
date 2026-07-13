@@ -125,16 +125,20 @@
           <span class="text-lg" id="btnText">AI音声データを生成する</span>
         </button>
 
-        <!-- 進捗インジケーター（処理中のみ表示） -->
+        <!-- 進捗インジケーター -->
         <div id="loadingIndicator" class="hidden bg-indigo-50 border border-indigo-100 rounded-2xl p-6 text-center">
           <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-500 border-t-transparent mb-3"></div>
-          <p class="text-sm font-semibold text-indigo-700 mb-1" id="loadingStatus">Gemini APIと通信しています...</p>
-          <p class="text-xs text-indigo-500">音声生成には数秒〜15秒ほどかかる場合があります（指数バックオフ待機を含む）</p>
+          <p class="text-sm font-semibold text-indigo-700 mb-1" id="loadingStatus">準備中...</p>
+          <p class="text-xs text-indigo-500 leading-relaxed">
+            長文は自動的に分割して個別に生成し、最後に1本の音声に結合（マージ）します。<br>
+            API制限を回避しながら安全に処理するため、しばらくお待ちください。
+          </p>
           
           <!-- 進捗バー -->
-          <div class="w-full bg-indigo-100 h-2 rounded-full overflow-hidden mt-3 max-w-md mx-auto">
+          <div class="w-full bg-indigo-100 h-2.5 rounded-full overflow-hidden mt-4 max-w-md mx-auto">
             <div id="progressBar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
           </div>
+          <p id="chunkProgressText" class="text-[11px] font-bold text-indigo-600 mt-2"></p>
         </div>
 
         <!-- 簡易的なエラー通知エリア -->
@@ -514,6 +518,70 @@
     }
 
     // ==========================================
+    // テキスト自動分割 (句読点と最大文字数に基づく)
+    // ==========================================
+    function splitTextIntoChunks(text, maxChunkSize = 600) {
+      if (text.length <= maxChunkSize) {
+        return [text];
+      }
+
+      const chunks = [];
+      let currentChunk = "";
+      
+      // 改行や句点でテキストを配列に分解
+      const sentences = text.match(/[^。！？\n]+[。！？\n]*/g) || [text];
+
+      for (const sentence of sentences) {
+        // 単一の文が制限を超える場合は、強制的に文字数で区切る
+        if (sentence.length > maxChunkSize) {
+          if (currentChunk.trim()) {
+            chunks.push(currentChunk);
+            currentChunk = "";
+          }
+          let temp = sentence;
+          while (temp.length > 0) {
+            chunks.push(temp.substring(0, maxChunkSize));
+            temp = temp.substring(maxChunkSize);
+          }
+        } 
+        // 蓄積中のテキストに足すと制限を超える場合、先に蓄積した分を出力
+        else if ((currentChunk + sentence).length > maxChunkSize) {
+          chunks.push(currentChunk);
+          currentChunk = sentence;
+        } 
+        // 制限内であれば連結
+        else {
+          currentChunk += sentence;
+        }
+      }
+
+      if (currentChunk.trim()) {
+        chunks.push(currentChunk);
+      }
+
+      return chunks;
+    }
+
+    // ==========================================
+    // PCM Int16 配列の超高速結合処理
+    // ==========================================
+    function concatenateInt16Arrays(arrays) {
+      let totalLength = 0;
+      arrays.forEach(arr => {
+        totalLength += arr.length;
+      });
+
+      const result = new Int16Array(totalLength);
+      let offset = 0;
+      arrays.forEach(arr => {
+        result.set(arr, offset);
+        offset += arr.length;
+      });
+
+      return result;
+    }
+
+    // ==========================================
     // PCMからWAVへのエンコード処理
     // ==========================================
     function createWavFile(pcmData, sampleRate = 24000) {
@@ -570,12 +638,11 @@
       for (let i = 0; i < len; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-      // Int16 (2 bytes) にキャスト
       const int16Array = new Int16Array(bytes.buffer);
       return int16Array;
     }
 
-    // クライアントサイドでのWAV->MP3への変換ダウンロード
+    // クライアントサイドでのダウンロード処理
     function downloadAudioBlob(blob, filename) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -588,7 +655,7 @@
     }
 
     // ==========================================
-    // 音声生成メインAPIロジック
+    // 音声生成メインAPIロジック (長文自動結合対応版)
     // ==========================================
     async function generateAudio() {
       clearError();
@@ -610,100 +677,137 @@
       const loader = document.getElementById('loadingIndicator');
       const progressBar = document.getElementById('progressBar');
       const btnText = document.getElementById('btnText');
+      const chunkText = document.getElementById('chunkProgressText');
       
       generateBtn.disabled = true;
-      btnText.innerText = "音声を生成中...";
+      btnText.innerText = "音声を分割生成中...";
       loader.classList.remove('hidden');
-      progressBar.style.width = '10%';
+      progressBar.style.width = '5%';
+      chunkText.innerText = "原稿を分割分析しています...";
 
-      // 指数バックオフ付きAPIコールの設定
-      const maxRetries = 5;
-      let delay = 1000;
-      let responseData = null;
+      // テキストを最大600字のチャンクに分割
+      const chunks = splitTextIntoChunks(text, 600);
+      const totalChunks = chunks.length;
+      const pcmArrays = [];
+      let sampleRate = 24000; // デフォルト設定
 
-      // エラー解消：TTS専用モデル 'gemini-2.5-flash-preview-tts' にエンドポイントを修正
       const apiURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{
-          parts: [{ text: text }]
-        }],
-        generationConfig: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: voice
-              }
-            }
-          }
-        },
-        model: "gemini-2.5-flash-preview-tts"
-      };
 
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          updateProgress(10 + attempt * 15, `Gemini APIと通信中... (試行 ${attempt}/${maxRetries})`);
-          
-          const response = await fetch(apiURL, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(payload)
-          });
-
-          if (response.status === 429) {
-            if (attempt === maxRetries) {
-              throw new Error("APIのリクエスト制限(Rate Limit 429)に達しました。少し時間を置いて再試行してください。");
-            }
-            updateProgress(10 + attempt * 15, `混雑しています。${delay / 1000}秒後に再接続を試みます...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            delay *= 2; 
-            continue;
-          }
-
-          if (!response.ok) {
-            const errJson = await response.json().catch(() => ({}));
-            throw new Error(errJson.error?.message || `APIエラー (HTTP ${response.status})`);
-          }
-
-          responseData = await response.json();
-          break; 
-
-        } catch (error) {
-          if (attempt === maxRetries) {
-            resetLoadingUI();
-            showError(`音声生成に失敗しました: ${error.message}`);
-            return;
-          }
-          await new Promise(resolve => setTimeout(resolve, delay));
-          delay *= 2;
-        }
-      }
-
-      // APIレスポンス解析
       try {
-        updateProgress(85, "音声を処理中...");
-        
-        const candidate = responseData.candidates?.[0];
-        const audioPart = candidate?.content?.parts?.find(p => p.inlineData && p.inlineData.mimeType.startsWith('audio/'));
+        for (let idx = 0; idx < totalChunks; idx++) {
+          const chunkTextContent = chunks[idx];
+          const chunkNum = idx + 1;
+          
+          updateProgress(
+            Math.round(5 + (idx / totalChunks) * 80), 
+            `音声パート生成中... (${chunkNum} / ${totalChunks} パート)`
+          );
+          chunkText.innerText = `内容: "${chunkTextContent.slice(0, 20)}..." (${chunkTextContent.length}文字)`;
 
-        if (!audioPart || !audioPart.inlineData?.data) {
-          throw new Error("レスポンスに音声データが含まれていません。読み上げ可能なテキストと設定を確認してください。");
+          const payload = {
+            contents: [{
+              parts: [{ text: chunkTextContent }]
+            }],
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: voice
+                  }
+                }
+              }
+            },
+            model: "gemini-2.5-flash-preview-tts"
+          };
+
+          // 各チャンクに対して指数バックオフ付きでリクエスト
+          const maxRetries = 5;
+          let delay = 1000;
+          let success = false;
+          let responseData = null;
+
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              const response = await fetch(apiURL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+              });
+
+              if (response.status === 429) {
+                if (attempt === maxRetries) {
+                  throw new Error("リクエストの制限(429)を超過しました。しばらく時間をおいて再実行してください。");
+                }
+                // 指数バックオフ待機
+                chunkText.innerText = `現在API混雑中。${delay / 1000}秒待機してからリクエストを再試行します...`;
+                await new Promise(resolve => setTimeout(resolve, delay));
+                delay *= 2;
+                continue;
+              }
+
+              if (!response.ok) {
+                const errJson = await response.json().catch(() => ({}));
+                throw new Error(errJson.error?.message || `APIエラー (HTTP ${response.status})`);
+              }
+
+              responseData = await response.json();
+              success = true;
+              break;
+
+            } catch (err) {
+              if (attempt === maxRetries) {
+                throw err;
+              }
+              await new Promise(resolve => setTimeout(resolve, delay));
+              delay *= 2;
+            }
+          }
+
+          if (!success) {
+            throw new Error(`パート ${chunkNum} の生成に失敗しました。`);
+          }
+
+          // 音声バイナリデータの抽出
+          const candidate = responseData.candidates?.[0];
+          const audioPart = candidate?.content?.parts?.find(p => p.inlineData && p.inlineData.mimeType.startsWith('audio/'));
+
+          if (!audioPart || !audioPart.inlineData?.data) {
+            throw new Error(`パート ${chunkNum} から有効な音声データが返されませんでした。`);
+          }
+
+          const base64Audio = audioPart.inlineData.data;
+          
+          // サンプリング周波数の同期
+          const mimeType = audioPart.inlineData.mimeType;
+          if (mimeType.includes('rate=')) {
+            const match = mimeType.match(/rate=(\d+)/);
+            if (match) sampleRate = parseInt(match[1]);
+          }
+
+          // PCM16に変換して配列にストック
+          const pcmPart = base64ToPcm16(base64Audio);
+          pcmArrays.push(pcmPart);
+
+          // API制限（レート制限）回避のため、リクエスト間に短時間のウェイトを配置 (特に複数チャンクある場合)
+          if (totalChunks > 1 && idx < totalChunks - 1) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
         }
 
-        const base64Audio = audioPart.inlineData.data;
-        let sampleRate = 24000;
-        const mimeType = audioPart.inlineData.mimeType;
-        if (mimeType.includes('rate=')) {
-          const match = mimeType.match(/rate=(\d+)/);
-          if (match) sampleRate = parseInt(match[1]);
-        }
+        // ==========================================
+        // 音声データのシームレスマージ（結合）
+        // ==========================================
+        updateProgress(90, "すべての音声パーツをシームレスに結合しています...");
+        chunkText.innerText = `結合処理: 合計 ${totalChunks} 個の音声パーツを高速連結中...`;
 
-        const pcmData = base64ToPcm16(base64Audio);
-        const wavBlob = createWavFile(pcmData, sampleRate);
+        const mergedPcm = concatenateInt16Arrays(pcmArrays);
+        const wavBlob = createWavFile(mergedPcm, sampleRate);
         const audioUrl = URL.createObjectURL(wavBlob);
 
+        // オーディオプレイヤーにバインド
         const player = document.getElementById('audioPlayer');
         player.src = audioUrl;
 
@@ -716,9 +820,12 @@
 
         document.getElementById('playerSection').classList.remove('hidden');
 
+        // 履歴にマージ後の大容量データを保存
         saveToHistory(text, voice, wavBlob, safeTitle);
 
-        updateProgress(100, "音声生成が完了しました！");
+        updateProgress(100, "すべての結合音声生成が完了しました！");
+        chunkText.innerText = `完了: ${chunks.length}パート (${text.length}文字) を繋ぎ合わせました。`;
+        
         setTimeout(() => {
           resetLoadingUI();
           player.play();
@@ -726,7 +833,7 @@
 
       } catch (err) {
         resetLoadingUI();
-        showError(`データの処理中にエラーが発生しました: ${err.message}`);
+        showError(`長文音声生成中にエラーが発生しました: ${err.message}`);
       }
     }
 
@@ -741,6 +848,7 @@
       document.getElementById('generateBtn').disabled = false;
       document.getElementById('btnText').innerText = "AI音声データを生成する";
       document.getElementById('loadingIndicator').classList.add('hidden');
+      document.getElementById('chunkProgressText').innerText = "";
     }
 
     // ==========================================
