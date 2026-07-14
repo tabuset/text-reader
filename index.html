@@ -176,6 +176,9 @@
             <div id="progressBar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
           </div>
           <p id="chunkProgressText" class="text-[11px] font-bold text-indigo-600 mt-2"></p>
+          <button onclick="cancelGeneration()" class="mt-3 text-xs px-4 py-2 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded-lg font-semibold transition-colors">
+            <i class="fa-solid fa-stop mr-1"></i>生成を中止する
+          </button>
         </div>
 
         <!-- 簡易的なエラー通知エリア -->
@@ -446,6 +449,7 @@
     let currentFilter = 'all';
     let localHistory = [];
     let currentSplitMode = 'auto'; // 'auto' | 'manual'
+    let generationCancelled = false;
 
     // ==========================================
     // レート制限対策：Gemini 2.5 Flash Preview TTS の無料枠は
@@ -455,6 +459,17 @@
     // ここでは安全側に倒して、直近のリクエストからの経過時間を必ず確保します。
     // ==========================================
     const MIN_REQUEST_INTERVAL_MS = 21000; // 1リクエストあたり最低21秒間隔をあける（無料枠の目安：約3RPM）
+    // パート数から、待機間隔(MIN_REQUEST_INTERVAL_MS)に基づくおおよその所要時間を計算して表示用に整形する
+    function formatEtaSeconds(numParts) {
+      if (numParts <= 0) return "0秒";
+      // 最初のパートは待機なし、2パート目以降は間隔分の待ちが発生する
+      const totalSeconds = Math.ceil(((numParts - 1) * MIN_REQUEST_INTERVAL_MS) / 1000);
+      if (totalSeconds < 60) return `${totalSeconds}秒`;
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return seconds > 0 ? `${minutes}分${seconds}秒` : `${minutes}分`;
+    }
+
     let lastRequestTimestamp = 0;
 
     async function waitForRequestSlot(statusEl) {
@@ -934,9 +949,11 @@
 
       // 自動・手動それぞれの分割バッジ数を算出してモーダル内にプレビュー表示
       const autoChunks = splitTextIntoChunksWithOptions(text, 'auto', 600);
-      document.getElementById('confirmAutoParts').innerText = `自動分割されるパーツ数: 全 ${autoChunks.length} パート`;
+      const autoEta = formatEtaSeconds(autoChunks.length);
+      document.getElementById('confirmAutoParts').innerText = `自動分割されるパーツ数: 全 ${autoChunks.length} パート（所要時間の目安: 約${autoEta}）`;
 
       const manualChunks = splitTextIntoChunksWithOptions(text, 'manual', 600);
+      const manualEta = formatEtaSeconds(manualChunks.length);
       const hasSplitLines = text.includes('---');
       
       const manualWarning = document.getElementById('confirmManualWarning');
@@ -945,7 +962,7 @@
       if (!hasSplitLines && text.length > 600) {
         manualWarning.classList.remove('hidden');
         manualWarningText.innerText = "注意: 原稿内に「---」が含まれていません。このまま手動分割を実行すると、全体が1つの超長文パーツとして送信され、音声が途切れるかエラーになる危険性があります。";
-        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 1 パート`;
+        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 1 パート（所要時間の目安: 約${formatEtaSeconds(1)}）`;
       } else {
         const overLimitIndex = manualChunks.findIndex(chunk => chunk.length > 1000);
         if (overLimitIndex !== -1) {
@@ -954,7 +971,7 @@
         } else {
           manualWarning.classList.add('hidden');
         }
-        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 ${manualChunks.length} パート`;
+        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 ${manualChunks.length} パート（所要時間の目安: 約${manualEta}）`;
       }
 
       // 設定確認モーダルをオープン
@@ -1017,6 +1034,7 @@
       loader.classList.remove('hidden');
       progressBar.style.width = '5%';
       chunkText.innerText = "構成を確認しています...";
+      generationCancelled = false;
 
       const pcmArrays = [];
       let sampleRate = 24000; // デフォルト設定
@@ -1025,6 +1043,9 @@
 
       try {
         for (let idx = 0; idx < totalChunks; idx++) {
+          if (generationCancelled) {
+            throw new Error("ユーザーにより生成がキャンセルされました。");
+          }
           const chunkTextContent = chunks[idx];
           const chunkNum = idx + 1;
           
@@ -1054,12 +1075,15 @@
           // 各チャンクに対してリトライ付きでリクエスト。
           // 送信前に必ず「前回リクエストからの最低間隔」を確保することで、
           // 無料枠のRPM(1分あたりリクエスト数)制限そのものに触れないようにする。
-          const maxRetries = 4;
-          let fallbackDelay = 25000; // サーバーがretryDelayを返さない場合の保険値(ms)
+          // ※リトライ回数を絞り、待機時間にも上限を設けることで「延々と待たされる」状態を防ぐ。
+          const maxRetries = 2;
+          let fallbackDelay = 20000; // サーバーがretryDelayを返さない場合の保険値(ms)
+          const MAX_BACKOFF_MS = 30000; // 待機時間が際限なく伸びないよう上限を設定
           let success = false;
           let responseData = null;
 
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            if (generationCancelled) throw new Error("ユーザーにより生成がキャンセルされました。");
             try {
               // 前回のリクエストから十分な間隔が空くまで待機（このアプリからの唯一の送信箇所）
               await waitForRequestSlot(chunkText);
@@ -1074,23 +1098,23 @@
 
               if (response.status === 429) {
                 const errJson = await response.json().catch(() => ({}));
-                const waitMs = extractRetryDelayMs(errJson, fallbackDelay);
+                const waitMs = Math.min(extractRetryDelayMs(errJson, fallbackDelay), MAX_BACKOFF_MS);
 
                 if (attempt === maxRetries) {
-                  throw new Error("APIのリクエスト制限(429)を超過しました。これは文字数ではなく「1分あたりのリクエスト回数」の上限によるものです。パート数を減らす（区切りを減らす）か、1分以上時間を置いてから再度お試しください。");
+                  throw new Error("APIのリクエスト制限(429)が解消しませんでした。1分近く間隔を空けても解消しない場合、無料枠の「1日あたりのリクエスト上限」に達している可能性があります（この上限は待っても回復せず、日付が変わるかプランを上げるまで解消しません）。Google AI Studioの利用状況（Quota）画面で残数をご確認ください。");
                 }
 
-                // サーバー指定（またはそれが無ければ保険値）の秒数だけ待機してから再送
-                // 次のwaitForRequestSlotの基準時刻もここで更新しておく
+                // サーバー指定（またはそれが無ければ保険値、ただし上限あり）の秒数だけ待機してから再送
                 lastRequestTimestamp = Date.now() + waitMs - MIN_REQUEST_INTERVAL_MS;
                 let countdown = Math.ceil(waitMs / 1000);
                 while (countdown > 0) {
-                  chunkText.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>API制限(429)を回避中... あと ${countdown} 秒で自動再接続します (試行 ${attempt}/${maxRetries})</span>`;
+                  if (generationCancelled) throw new Error("ユーザーにより生成がキャンセルされました。");
+                  chunkText.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>API制限(429)を回避中... あと ${countdown} 秒で再接続します (試行 ${attempt}/${maxRetries})</span>`;
                   await new Promise(resolve => setTimeout(resolve, 1000));
                   countdown--;
                 }
 
-                fallbackDelay *= 2;
+                fallbackDelay = Math.min(fallbackDelay * 1.5, MAX_BACKOFF_MS);
                 continue;
               }
 
@@ -1104,11 +1128,11 @@
               break;
 
             } catch (err) {
-              if (attempt === maxRetries) {
+              if (attempt === maxRetries || generationCancelled) {
                 throw err;
               }
-              await new Promise(resolve => setTimeout(resolve, fallbackDelay));
-              fallbackDelay *= 2;
+              await new Promise(resolve => setTimeout(resolve, Math.min(fallbackDelay, MAX_BACKOFF_MS)));
+              fallbackDelay = Math.min(fallbackDelay * 1.5, MAX_BACKOFF_MS);
             }
           }
 
@@ -1166,8 +1190,18 @@
 
       } catch (err) {
         resetLoadingUI();
-        showError(`長文音声生成中にエラーが発生しました: ${err.message}`);
+        if (generationCancelled) {
+          showStatusNotification("音声生成を中止しました。");
+        } else {
+          showError(`長文音声生成中にエラーが発生しました: ${err.message}`);
+        }
       }
+    }
+
+    // 生成中止ボタン
+    function cancelGeneration() {
+      generationCancelled = true;
+      document.getElementById('chunkProgressText').innerText = "中止しています...";
     }
 
     // UI進捗更新
