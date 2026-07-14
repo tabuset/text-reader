@@ -168,7 +168,7 @@
           <p class="text-sm font-semibold text-indigo-700 mb-1" id="loadingStatus">準備中...</p>
           <p class="text-xs text-indigo-500 leading-relaxed">
             長文は自動的に分割して個別に生成し、最後に1本の音声に結合（マージ）します。<br>
-            無料版APIキーの制限を回避するため、安全な時間間隔を空けながらリクエストします。
+            無料版APIキーの「1分あたりのリクエスト回数」制限を守るため、各パートの間に約20秒の間隔を空けて送信します（パート数が多いほど合計時間はかかります）。
           </p>
           
           <!-- 進捗バー -->
@@ -447,6 +447,52 @@
     let localHistory = [];
     let currentSplitMode = 'auto'; // 'auto' | 'manual'
 
+    // ==========================================
+    // レート制限対策：Gemini 2.5 Flash Preview TTS の無料枠は
+    // 「1分あたりのリクエスト数(RPM)」が非常に少なく設定されています。
+    // 文字数を分割しても、短時間にリクエスト数が増えるほど429になりやすくなります。
+    // そのため「何文字ごとに切るか」より「何秒間隔でリクエストを送るか」の方が重要です。
+    // ここでは安全側に倒して、直近のリクエストからの経過時間を必ず確保します。
+    // ==========================================
+    const MIN_REQUEST_INTERVAL_MS = 21000; // 1リクエストあたり最低21秒間隔をあける（無料枠の目安：約3RPM）
+    let lastRequestTimestamp = 0;
+
+    async function waitForRequestSlot(statusEl) {
+      const now = Date.now();
+      const elapsed = now - lastRequestTimestamp;
+      const remaining = MIN_REQUEST_INTERVAL_MS - elapsed;
+      if (remaining > 0 && lastRequestTimestamp !== 0) {
+        let countdown = Math.ceil(remaining / 1000);
+        while (countdown > 0) {
+          if (statusEl) {
+            statusEl.innerHTML = `<span class="text-indigo-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>APIの無料枠制限を守るため待機中... あと ${countdown} 秒</span>`;
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          countdown--;
+        }
+      }
+      lastRequestTimestamp = Date.now();
+    }
+
+    // 429エラーのレスポンス本文から、Google側が推奨する待機秒数(retryDelay)を取り出す
+    // 例: error.details 内に "@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "13s" が入っていることがある
+    function extractRetryDelayMs(errJson, fallbackMs) {
+      try {
+        const details = errJson?.error?.details || [];
+        for (const d of details) {
+          if (d.retryDelay) {
+            const seconds = parseFloat(String(d.retryDelay).replace('s', ''));
+            if (!isNaN(seconds) && seconds > 0) {
+              return Math.ceil(seconds * 1000) + 1000; // 念のため1秒の余裕を追加
+            }
+          }
+        }
+      } catch (e) {
+        // 解析に失敗した場合はフォールバック値を使用
+      }
+      return fallbackMs;
+    }
+
     // 初期化ロード
     window.onload = function() {
       // 保存済みAPIキーの読み込み
@@ -496,9 +542,9 @@
       currentSplitMode = mode;
       const helpText = document.getElementById('splitHelpText');
       if (mode === 'auto') {
-        helpText.innerHTML = "※自動分割では、文末の「。」などを考慮してシステムが適切な長さ（最大600文字）で自動的に文章を切り分けます。";
+        helpText.innerHTML = "※自動分割では、文末の「。」などを考慮してシステムが適切な長さ（最大600文字）で自動的に文章を切り分けます。<br>※429エラーは文字数ではなく「1分あたりのリクエスト回数」の上限が原因です。パート数が増えるほどリクエスト回数が増え、かえってエラーが出やすくなります。";
       } else {
-        helpText.innerHTML = "※手動分割では、テキスト中の <strong>「---」</strong>（前後に改行推奨）の位置で厳密に分割されます。各ブロックはGemini APIの処理限界である1000文字以内に収めてください。";
+        helpText.innerHTML = "※手動分割では、テキスト中の <strong>「---」</strong>（前後に改行推奨）の位置で厳密に分割されます。各ブロックはGemini APIの処理限界である1000文字以内に収めてください。<br>※429エラーは文字数ではなく「1分あたりのリクエスト回数」の上限が原因です。パート数を増やしすぎないことが重要です。";
       }
       updateSplitPreview();
     }
@@ -1005,14 +1051,19 @@
             model: "gemini-2.5-flash-preview-tts"
           };
 
-          // 各チャンクに対して指数バックオフ付きでリクエスト
-          const maxRetries = 5;
-          let delay = 3000; 
+          // 各チャンクに対してリトライ付きでリクエスト。
+          // 送信前に必ず「前回リクエストからの最低間隔」を確保することで、
+          // 無料枠のRPM(1分あたりリクエスト数)制限そのものに触れないようにする。
+          const maxRetries = 4;
+          let fallbackDelay = 25000; // サーバーがretryDelayを返さない場合の保険値(ms)
           let success = false;
           let responseData = null;
 
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
+              // 前回のリクエストから十分な間隔が空くまで待機（このアプリからの唯一の送信箇所）
+              await waitForRequestSlot(chunkText);
+
               const response = await fetch(apiURL, {
                 method: 'POST',
                 headers: {
@@ -1022,19 +1073,24 @@
               });
 
               if (response.status === 429) {
+                const errJson = await response.json().catch(() => ({}));
+                const waitMs = extractRetryDelayMs(errJson, fallbackDelay);
+
                 if (attempt === maxRetries) {
-                  throw new Error("APIのリクエスト制限(429)を超過しました。分割数を減らすか、APIキーの制限解除のため1分ほど置いてから再度お試しください。");
+                  throw new Error("APIのリクエスト制限(429)を超過しました。これは文字数ではなく「1分あたりのリクエスト回数」の上限によるものです。パート数を減らす（区切りを減らす）か、1分以上時間を置いてから再度お試しください。");
                 }
-                
-                // カウントダウン付きの待機状態に更新
-                let countdown = Math.round(delay / 1000);
+
+                // サーバー指定（またはそれが無ければ保険値）の秒数だけ待機してから再送
+                // 次のwaitForRequestSlotの基準時刻もここで更新しておく
+                lastRequestTimestamp = Date.now() + waitMs - MIN_REQUEST_INTERVAL_MS;
+                let countdown = Math.ceil(waitMs / 1000);
                 while (countdown > 0) {
-                  chunkText.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>API制限を回避中... あと ${countdown} 秒で自動再接続します (試行 ${attempt}/${maxRetries})</span>`;
+                  chunkText.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>API制限(429)を回避中... あと ${countdown} 秒で自動再接続します (試行 ${attempt}/${maxRetries})</span>`;
                   await new Promise(resolve => setTimeout(resolve, 1000));
                   countdown--;
                 }
-                
-                delay *= 2; 
+
+                fallbackDelay *= 2;
                 continue;
               }
 
@@ -1051,8 +1107,8 @@
               if (attempt === maxRetries) {
                 throw err;
               }
-              await new Promise(resolve => setTimeout(resolve, delay));
-              delay *= 2;
+              await new Promise(resolve => setTimeout(resolve, fallbackDelay));
+              fallbackDelay *= 2;
             }
           }
 
@@ -1077,13 +1133,6 @@
 
           const pcmPart = base64ToPcm16(base64Audio);
           pcmArrays.push(pcmPart);
-
-          // 無料APIキーの制限をスマートに回避するため、連続リクエスト間に安全なセーフウェイトを挟む
-          if (totalChunks > 1 && idx < totalChunks - 1) {
-            const safetyWaitTime = totalChunks >= 3 ? 1800 : 800;
-            chunkText.innerText = `次のパートの生成を安全に準備中...`;
-            await new Promise(resolve => setTimeout(resolve, safetyWaitTime));
-          }
         }
 
         updateProgress(90, "すべての音声パーツをシームレスに結合しています...");
