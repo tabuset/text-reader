@@ -9,7 +9,7 @@
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght=300;400;500;700&display=swap');
     body {
       font-family: 'Noto Sans JP', sans-serif;
     }
@@ -166,19 +166,16 @@
         <div id="loadingIndicator" class="hidden bg-indigo-50 border border-indigo-100 rounded-2xl p-6 text-center">
           <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-indigo-500 border-t-transparent mb-3"></div>
           <p class="text-sm font-semibold text-indigo-700 mb-1" id="loadingStatus">準備中...</p>
-          <p class="text-xs text-indigo-500 leading-relaxed">
+          <div class="text-xs text-indigo-500 leading-relaxed max-w-lg mx-auto">
             長文は自動的に分割して個別に生成し、最後に1本の音声に結合（マージ）します。<br>
-            無料版APIキーの「1分あたりのリクエスト回数」制限を守るため、各パートの間に約20秒の間隔を空けて送信します（パート数が多いほど合計時間はかかります）。
-          </p>
+            無料版APIキーのアクセス頻度制限（RPM）を回避するため、リクエスト間に約21秒の間隔を空けて安全に処理します。
+          </div>
           
           <!-- 進捗バー -->
           <div class="w-full bg-indigo-100 h-2.5 rounded-full overflow-hidden mt-4 max-w-md mx-auto">
             <div id="progressBar" class="bg-indigo-600 h-full w-0 transition-all duration-300"></div>
           </div>
           <p id="chunkProgressText" class="text-[11px] font-bold text-indigo-600 mt-2"></p>
-          <button onclick="cancelGeneration()" class="mt-3 text-xs px-4 py-2 bg-white hover:bg-rose-50 text-rose-600 border border-rose-200 rounded-lg font-semibold transition-colors">
-            <i class="fa-solid fa-stop mr-1"></i>生成を中止する
-          </button>
         </div>
 
         <!-- 簡易的なエラー通知エリア -->
@@ -224,6 +221,20 @@
             </div>
           </div>
         </div>
+
+        <!-- 新設：サイレンストリマー設定（EOSバグ対策） -->
+        <div class="border-t border-slate-100 pt-3 mt-1 flex flex-col gap-2">
+          <span class="text-xs font-bold text-slate-700 flex items-center gap-1">
+            <i class="fa-solid fa-scissors text-emerald-500"></i>無音の自動検出・カット設定
+          </span>
+          <label class="flex items-center gap-2 text-xs text-slate-600 cursor-pointer bg-emerald-50/30 p-2.5 rounded-lg border border-emerald-100/50">
+            <input type="checkbox" id="silenceTrimCheckbox" checked class="text-emerald-600 focus:ring-emerald-500 rounded">
+            <div>
+              <span class="font-bold text-slate-700 block">末尾の長大無音を自動カットする</span>
+              <span class="text-[10px] text-slate-400 block mt-0.5">Gemini APIのバグによる「数分間に及ぶ空白ノイズ」を波形解析して強制トリミングします。</span>
+            </div>
+          </label>
+        </div>
       </div>
 
       <!-- 再生プレイヤー / ダウンロード -->
@@ -245,7 +256,9 @@
             <i class="fa-solid fa-download"></i> MP3をダウンロード
           </button>
         </div>
-        <p class="text-[10px] text-indigo-300 text-center">※標準WAVおよび最適圧縮MP3にて書き出されます。</p>
+        <div id="trimReportText" class="text-[10px] text-emerald-300 font-medium text-center hidden">
+          <!-- トリミング通知 -->
+        </div>
       </div>
 
       <!-- 履歴セクション -->
@@ -265,7 +278,7 @@
     </div>
   </main>
 
-  <!-- ［新設］生成前最終設定確認 モーダル -->
+  <!-- 生成前最終設定確認 モーダル -->
   <div id="confirmModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center z-50 p-4">
     <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 flex flex-col gap-5 animate-in fade-in zoom-in-95 duration-200 text-left">
       <div class="flex justify-between items-center border-b border-slate-100 pb-3">
@@ -449,64 +462,7 @@
     let currentFilter = 'all';
     let localHistory = [];
     let currentSplitMode = 'auto'; // 'auto' | 'manual'
-    let generationCancelled = false;
-
-    // ==========================================
-    // レート制限対策：Gemini 2.5 Flash Preview TTS の無料枠は
-    // 「1分あたりのリクエスト数(RPM)」が非常に少なく設定されています。
-    // 文字数を分割しても、短時間にリクエスト数が増えるほど429になりやすくなります。
-    // そのため「何文字ごとに切るか」より「何秒間隔でリクエストを送るか」の方が重要です。
-    // ここでは安全側に倒して、直近のリクエストからの経過時間を必ず確保します。
-    // ==========================================
-    const MIN_REQUEST_INTERVAL_MS = 21000; // 1リクエストあたり最低21秒間隔をあける（無料枠の目安：約3RPM）
-    // パート数から、待機間隔(MIN_REQUEST_INTERVAL_MS)に基づくおおよその所要時間を計算して表示用に整形する
-    function formatEtaSeconds(numParts) {
-      if (numParts <= 0) return "0秒";
-      // 最初のパートは待機なし、2パート目以降は間隔分の待ちが発生する
-      const totalSeconds = Math.ceil(((numParts - 1) * MIN_REQUEST_INTERVAL_MS) / 1000);
-      if (totalSeconds < 60) return `${totalSeconds}秒`;
-      const minutes = Math.floor(totalSeconds / 60);
-      const seconds = totalSeconds % 60;
-      return seconds > 0 ? `${minutes}分${seconds}秒` : `${minutes}分`;
-    }
-
-    let lastRequestTimestamp = 0;
-
-    async function waitForRequestSlot(statusEl) {
-      const now = Date.now();
-      const elapsed = now - lastRequestTimestamp;
-      const remaining = MIN_REQUEST_INTERVAL_MS - elapsed;
-      if (remaining > 0 && lastRequestTimestamp !== 0) {
-        let countdown = Math.ceil(remaining / 1000);
-        while (countdown > 0) {
-          if (statusEl) {
-            statusEl.innerHTML = `<span class="text-indigo-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>APIの無料枠制限を守るため待機中... あと ${countdown} 秒</span>`;
-          }
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          countdown--;
-        }
-      }
-      lastRequestTimestamp = Date.now();
-    }
-
-    // 429エラーのレスポンス本文から、Google側が推奨する待機秒数(retryDelay)を取り出す
-    // 例: error.details 内に "@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "13s" が入っていることがある
-    function extractRetryDelayMs(errJson, fallbackMs) {
-      try {
-        const details = errJson?.error?.details || [];
-        for (const d of details) {
-          if (d.retryDelay) {
-            const seconds = parseFloat(String(d.retryDelay).replace('s', ''));
-            if (!isNaN(seconds) && seconds > 0) {
-              return Math.ceil(seconds * 1000) + 1000; // 念のため1秒の余裕を追加
-            }
-          }
-        }
-      } catch (e) {
-        // 解析に失敗した場合はフォールバック値を使用
-      }
-      return fallbackMs;
-    }
+    let lastRequestTime = 0; // RPM制限のための前回の実行時刻をトラッキング
 
     // 初期化ロード
     window.onload = function() {
@@ -557,14 +513,14 @@
       currentSplitMode = mode;
       const helpText = document.getElementById('splitHelpText');
       if (mode === 'auto') {
-        helpText.innerHTML = "※自動分割では、文末の「。」などを考慮してシステムが適切な長さ（最大600文字）で自動的に文章を切り分けます。<br>※429エラーは文字数ではなく「1分あたりのリクエスト回数」の上限が原因です。パート数が増えるほどリクエスト回数が増え、かえってエラーが出やすくなります。";
+        helpText.innerHTML = "※自動分割では、文末の「。」などを考慮してシステムが適切な長さ（最大600文字）で自動的に文章を切り分けます。";
       } else {
-        helpText.innerHTML = "※手動分割では、テキスト中の <strong>「---」</strong>（前後に改行推奨）の位置で厳密に分割されます。各ブロックはGemini APIの処理限界である1000文字以内に収めてください。<br>※429エラーは文字数ではなく「1分あたりのリクエスト回数」の上限が原因です。パート数を増やしすぎないことが重要です。";
+        helpText.innerHTML = "※手動分割では、テキスト中の <strong>「---」</strong>（前後に改行推奨）の位置で厳密に分割されます。各ブロックはGemini APIの処理限界である1000文字以内に収めてください。";
       }
       updateSplitPreview();
     }
 
-    // タグを挿入する (スクロール位置の退避・復元を追加)
+    // タグを挿入する (スクロール位置の退避・復元)
     function insertTag(tag) {
       const textarea = document.getElementById('textInput');
       const startPos = textarea.selectionStart;
@@ -582,7 +538,7 @@
       handleTextInput();
     }
 
-    // 分割ライン「---」を挿入する (スクロール位置の退避・復元を追加)
+    // 分割ライン「---」を挿入する (スクロール位置の退避・復元)
     function insertSplitLine() {
       const textarea = document.getElementById('textInput');
       const startPos = textarea.selectionStart;
@@ -758,20 +714,17 @@
     }
 
     // ==========================================
-    // テキスト自動・手動分割ロジック（方式を直接指定できる版）
+    // テキスト自動・手動分割ロジック（方式指定可能版）
     // ==========================================
     function splitTextIntoChunksWithOptions(text, mode, maxChunkSize = 600) {
       if (!text.trim()) return [];
 
-      // 手動分割モードの場合
       if (mode === 'manual') {
-        // --- で分割し、前後の不要な改行や空白を除去。空のパートは除外
         return text.split(/---/g)
                    .map(chunk => chunk.trim())
                    .filter(chunk => chunk.length > 0);
       }
 
-      // 自動分割モードの場合 (従来通りの賢い分割)
       if (text.length <= maxChunkSize) {
         return [text];
       }
@@ -779,7 +732,6 @@
       const chunks = [];
       let currentChunk = "";
       
-      // 改行や句点でテキストを配列に分解
       const sentences = text.match(/[^。！？\n]+[。！？\n]*/g) || [text];
 
       for (const sentence of sentences) {
@@ -810,13 +762,63 @@
       return chunks;
     }
 
-    // 後方互換用のインターフェース
     function splitTextIntoChunks(text, maxChunkSize = 600) {
       return splitTextIntoChunksWithOptions(text, currentSplitMode, maxChunkSize);
     }
 
     // ==========================================
-    // PCM Int16 配列の超高速結合処理
+    // 🔊 サイレンストリマー：末尾の長大無音ノイズをメモリ上で自動解析・高速トリミング
+    // ==========================================
+    function trimTrailingSilence(pcmData, sampleRate = 24000, threshold = 180, paddingSeconds = 0.4) {
+      const totalSamples = pcmData.length;
+      let lastSoundIndex = -1;
+
+      // 後ろからスキャンして、振幅しきい値(threshold)を超える最初のインデックスを検索
+      for (let i = totalSamples - 1; i >= 0; i--) {
+        if (Math.abs(pcmData[i]) > threshold) {
+          lastSoundIndex = i;
+          break;
+        }
+      }
+
+      // 音声が一切検出されなかった場合（完全に全データが無音の場合）
+      if (lastSoundIndex === -1) {
+        console.warn("全領域が無音として検知されました。");
+        // 最低限の無音領域(0.2秒分)を残して切り落とす
+        return pcmData.slice(0, Math.min(totalSamples, Math.floor(sampleRate * 0.2)));
+      }
+
+      // 余韻(paddingSeconds)を付与してぶつ切りになるのを防ぐ
+      const paddingSamples = Math.floor(paddingSeconds * sampleRate);
+      const targetLength = Math.min(totalSamples, lastSoundIndex + paddingSamples);
+
+      // カットした秒数を計算
+      const cutSeconds = (totalSamples - targetLength) / sampleRate;
+
+      // 1.0秒以上の無音領域が検出された場合のみトリミングを適用（誤認カット防止）
+      if (cutSeconds >= 1.0) {
+        console.log(`[Silence Trimmer] 末尾の無音 ${cutSeconds.toFixed(2)} 秒を検知・自動削除しました。`);
+        
+        // 処理の成果をグローバル変数やDOMへ報告
+        const reportEl = document.getElementById('trimReportText');
+        if (reportEl) {
+          reportEl.innerHTML = `<i class="fa-solid fa-scissors"></i> EOSバグを回避：末尾の無音 <strong>${cutSeconds.toFixed(1)}秒</strong> を自動カットしました`;
+          reportEl.classList.remove('hidden');
+        }
+
+        return pcmData.slice(0, targetLength);
+      }
+
+      // 条件を満たさない場合は何もしない（無音は通常の余韻範囲内）
+      const reportEl = document.getElementById('trimReportText');
+      if (reportEl) {
+        reportEl.classList.add('hidden');
+      }
+      return pcmData;
+    }
+
+    // ==========================================
+    // PCM Int16 配列の高速結合処理
     // ==========================================
     function concatenateInt16Arrays(arrays) {
       let totalLength = 0;
@@ -857,9 +859,9 @@
       view.setUint16(22, 1, true); // モノラル
       /* sample rate */
       view.setUint32(24, sampleRate, true);
-      /* byte rate (sample rate * block align) */
+      /* byte rate */
       view.setUint32(28, sampleRate * 2, true);
-      /* block align (channel count * bytes per sample) */
+      /* block align */
       view.setUint16(32, 2, true);
       /* bits per sample */
       view.setUint16(34, 16, true);
@@ -876,14 +878,12 @@
       return new Blob([buffer], { type: 'audio/wav' });
     }
 
-    // 文字列書き込みヘルパー
     function writeString(view, offset, string) {
       for (let i = 0; i < string.length; i++) {
         view.setUint8(offset + i, string.charCodeAt(i));
       }
     }
 
-    // PCM_L16 (Base64) から Int16Array へ変換
     function base64ToPcm16(base64) {
       const binaryString = window.atob(base64);
       const len = binaryString.length;
@@ -891,11 +891,9 @@
       for (let i = 0; i < len; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-      const int16Array = new Int16Array(bytes.buffer);
-      return int16Array;
+      return new Int16Array(bytes.buffer);
     }
 
-    // クライアントサイドでのダウンロード処理
     function downloadAudioBlob(blob, filename) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -919,10 +917,7 @@
       }
     }
 
-    // ==========================================
-    // 音声生成メインAPIロジック 
-    // STEP1: まずは初期チェックを走り、確認モーダルを開く
-    // ==========================================
+    // 最終設定確認用のフック
     function generateAudio() {
       clearError();
       const apiKey = document.getElementById('apiKeyInput').value.trim();
@@ -937,23 +932,18 @@
         return;
       }
 
-      // モーダル内のキャラクターカウントを更新
       document.getElementById('confirmCharCount').innerText = text.length;
 
-      // メイン画面で現在選ばれている分割方式を、モーダル内のラジオボタンに事前に同期
       if (currentSplitMode === 'auto') {
         document.getElementById('confirmSplitAuto').checked = true;
       } else {
         document.getElementById('confirmSplitManual').checked = true;
       }
 
-      // 自動・手動それぞれの分割バッジ数を算出してモーダル内にプレビュー表示
       const autoChunks = splitTextIntoChunksWithOptions(text, 'auto', 600);
-      const autoEta = formatEtaSeconds(autoChunks.length);
-      document.getElementById('confirmAutoParts').innerText = `自動分割されるパーツ数: 全 ${autoChunks.length} パート（所要時間の目安: 約${autoEta}）`;
+      document.getElementById('confirmAutoParts').innerText = `自動分割されるパーツ数: 全 ${autoChunks.length} パート`;
 
       const manualChunks = splitTextIntoChunksWithOptions(text, 'manual', 600);
-      const manualEta = formatEtaSeconds(manualChunks.length);
       const hasSplitLines = text.includes('---');
       
       const manualWarning = document.getElementById('confirmManualWarning');
@@ -962,7 +952,7 @@
       if (!hasSplitLines && text.length > 600) {
         manualWarning.classList.remove('hidden');
         manualWarningText.innerText = "注意: 原稿内に「---」が含まれていません。このまま手動分割を実行すると、全体が1つの超長文パーツとして送信され、音声が途切れるかエラーになる危険性があります。";
-        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 1 パート（所要時間の目安: 約${formatEtaSeconds(1)}）`;
+        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 1 パート`;
       } else {
         const overLimitIndex = manualChunks.findIndex(chunk => chunk.length > 1000);
         if (overLimitIndex !== -1) {
@@ -971,21 +961,59 @@
         } else {
           manualWarning.classList.add('hidden');
         }
-        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 ${manualChunks.length} パート（所要時間の目安: 約${manualEta}）`;
+        document.getElementById('confirmManualParts').innerText = `手動分割されるパーツ数: 全 ${manualChunks.length} パート`;
       }
 
-      // 設定確認モーダルをオープン
       toggleConfirmModal(true);
     }
 
     // ==========================================
-    // STEP2: 最終決定された分割方式で、実際の非同期API処理を実行する
+    // ⏱️ API送信タイミング制御：前回の送信完了から厳密に21秒待機
+    // ==========================================
+    async function waitForRequestSlot(statusEl, chunkTextEl) {
+      const now = Date.now();
+      const timeSinceLast = now - lastRequestTime;
+      const minInterval = 21000; // API規制回避：前回の叩きから厳格に21秒確保
+
+      if (timeSinceLast < minInterval) {
+        let waitTime = minInterval - timeSinceLast;
+        while (waitTime > 0) {
+          const secondsLeft = Math.ceil(waitTime / 1000);
+          statusEl.innerText = `API制限を回避するため待機中...`;
+          chunkTextEl.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>無料枠制限を遵守するため、送信まであと ${secondsLeft} 秒お待ちください...</span>`;
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          waitTime -= 1000;
+        }
+      }
+    }
+
+    // 429レスポンスからretryDelay(待機要求時間)の値をミリ秒単位でパースする
+    function extractRetryDelayMs(errorData) {
+      try {
+        const details = errorData.error?.details;
+        if (Array.isArray(details)) {
+          for (const d of details) {
+            const metadata = d.metadata;
+            if (metadata && metadata.retryDelay) {
+              const seconds = parseFloat(metadata.retryDelay.replace('s', ''));
+              if (!isNaN(seconds)) {
+                return Math.ceil(seconds * 1000);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("retryDelayのパースに失敗しました:", e);
+      }
+      return 25000; // パースできない場合のフォールバック（25秒）
+    }
+
+    // ==========================================
+    // 音声生成非同期処理
     // ==========================================
     async function startGenerateAudio() {
-      // モーダル内で決定された最終設定を取得
       const finalSelectedMode = document.querySelector('input[name="confirmSplitMode"]:checked').value;
       
-      // メイン画面のラジオボタン・内部ステートを即同期
       const mainRadios = document.getElementsByName('splitMode');
       for (const r of mainRadios) {
         if (r.value === finalSelectedMode) {
@@ -995,16 +1023,14 @@
       currentSplitMode = finalSelectedMode;
       toggleSplitMode(finalSelectedMode);
 
-      // モーダルを閉じる
       toggleConfirmModal(false);
 
-      // 実際の生成開始
       clearError();
       const apiKey = document.getElementById('apiKeyInput').value.trim();
       const text = document.getElementById('textInput').value.trim();
       const voice = document.getElementById('voiceSelect').value;
+      const enableSilenceTrim = document.getElementById('silenceTrimCheckbox').checked;
 
-      // テキストの分割処理
       const chunks = splitTextIntoChunks(text, 600);
       const totalChunks = chunks.length;
 
@@ -1013,16 +1039,14 @@
         return;
       }
 
-      // 手動分割時の1000文字オーバーのバリデーションチェック
       if (currentSplitMode === 'manual') {
         const overLimitIndex = chunks.findIndex(chunk => chunk.length > 1000);
         if (overLimitIndex !== -1) {
-          showError(`分割パート ${overLimitIndex + 1} が1000文字を超えています（現在 ${chunks[overLimitIndex].length} 文字）。Gemini APIの処理限界を超えてトーン変化や途切れが発生するリスクがあるため、さらに「---」を挟んで小さく区切ってください。`);
+          showError(`分割パート ${overLimitIndex + 1} が1000文字を超えています。小さく区切ってください。`);
           return;
         }
       }
 
-      // UIの状態を「処理中」へ
       const generateBtn = document.getElementById('generateBtn');
       const loader = document.getElementById('loadingIndicator');
       const progressBar = document.getElementById('progressBar');
@@ -1034,21 +1058,26 @@
       loader.classList.remove('hidden');
       progressBar.style.width = '5%';
       chunkText.innerText = "構成を確認しています...";
-      generationCancelled = false;
+
+      // トリミング報告の初期化
+      const trimReportEl = document.getElementById('trimReportText');
+      if (trimReportEl) trimReportEl.classList.add('hidden');
 
       const pcmArrays = [];
-      let sampleRate = 24000; // デフォルト設定
+      let sampleRate = 24000;
 
       const apiURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
 
       try {
         for (let idx = 0; idx < totalChunks; idx++) {
-          if (generationCancelled) {
-            throw new Error("ユーザーにより生成がキャンセルされました。");
-          }
           const chunkTextContent = chunks[idx];
           const chunkNum = idx + 1;
           
+          // 429制限を物理的に回避する強制待機処理
+          if (idx > 0) {
+            await waitForRequestSlot(document.getElementById('loadingStatus'), chunkText);
+          }
+
           updateProgress(
             Math.round(5 + (idx / totalChunks) * 80), 
             `音声パート生成中... (${chunkNum} / ${totalChunks} パート)`
@@ -1072,49 +1101,39 @@
             model: "gemini-2.5-flash-preview-tts"
           };
 
-          // 各チャンクに対してリトライ付きでリクエスト。
-          // 送信前に必ず「前回リクエストからの最低間隔」を確保することで、
-          // 無料枠のRPM(1分あたりリクエスト数)制限そのものに触れないようにする。
-          // ※リトライ回数を絞り、待機時間にも上限を設けることで「延々と待たされる」状態を防ぐ。
-          const maxRetries = 2;
-          let fallbackDelay = 20000; // サーバーがretryDelayを返さない場合の保険値(ms)
-          const MAX_BACKOFF_MS = 30000; // 待機時間が際限なく伸びないよう上限を設定
+          const maxRetries = 5;
+          let delay = 3000; 
           let success = false;
           let responseData = null;
 
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            if (generationCancelled) throw new Error("ユーザーにより生成がキャンセルされました。");
             try {
-              // 前回のリクエストから十分な間隔が空くまで待機（このアプリからの唯一の送信箇所）
-              await waitForRequestSlot(chunkText);
+              // 送信前のタイムスタンプを保存
+              lastRequestTime = Date.now();
 
               const response = await fetch(apiURL, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
               });
 
               if (response.status === 429) {
-                const errJson = await response.json().catch(() => ({}));
-                const waitMs = Math.min(extractRetryDelayMs(errJson, fallbackDelay), MAX_BACKOFF_MS);
-
                 if (attempt === maxRetries) {
-                  throw new Error("APIのリクエスト制限(429)が解消しませんでした。1分近く間隔を空けても解消しない場合、無料枠の「1日あたりのリクエスト上限」に達している可能性があります（この上限は待っても回復せず、日付が変わるかプランを上げるまで解消しません）。Google AI Studioの利用状況（Quota）画面で残数をご確認ください。");
+                  throw new Error("APIのリクエスト制限(429)を超過しました。しばらく置いてから再度お試しください。");
                 }
-
-                // サーバー指定（またはそれが無ければ保険値、ただし上限あり）の秒数だけ待機してから再送
-                lastRequestTimestamp = Date.now() + waitMs - MIN_REQUEST_INTERVAL_MS;
-                let countdown = Math.ceil(waitMs / 1000);
+                
+                // エラーレスポンスから待機指定時間を自動抽出
+                const errorData = await response.json().catch(() => ({}));
+                const serverRetryDelay = extractRetryDelayMs(errorData);
+                
+                let countdown = Math.round(serverRetryDelay / 1000);
                 while (countdown > 0) {
-                  if (generationCancelled) throw new Error("ユーザーにより生成がキャンセルされました。");
-                  chunkText.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>API制限(429)を回避中... あと ${countdown} 秒で再接続します (試行 ${attempt}/${maxRetries})</span>`;
+                  chunkText.innerHTML = `<span class="text-amber-600 font-bold"><i class="fa-solid fa-hourglass-half animate-spin mr-1"></i>API制限を回避中... あと ${countdown} 秒で自動リトライします (試行 ${attempt}/${maxRetries})</span>`;
                   await new Promise(resolve => setTimeout(resolve, 1000));
                   countdown--;
                 }
-
-                fallbackDelay = Math.min(fallbackDelay * 1.5, MAX_BACKOFF_MS);
+                
+                delay = serverRetryDelay * 2; 
                 continue;
               }
 
@@ -1128,11 +1147,11 @@
               break;
 
             } catch (err) {
-              if (attempt === maxRetries || generationCancelled) {
+              if (attempt === maxRetries) {
                 throw err;
               }
-              await new Promise(resolve => setTimeout(resolve, Math.min(fallbackDelay, MAX_BACKOFF_MS)));
-              fallbackDelay = Math.min(fallbackDelay * 1.5, MAX_BACKOFF_MS);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              delay *= 2;
             }
           }
 
@@ -1144,7 +1163,7 @@
           const audioPart = candidate?.content?.parts?.find(p => p.inlineData && p.inlineData.mimeType.startsWith('audio/'));
 
           if (!audioPart || !audioPart.inlineData?.data) {
-            throw new Error(`パート ${chunkNum} から有効な音声データが返されませんでした。`);
+            throw new Error(`パート ${chunkNum} から音声データが返されませんでした。`);
           }
 
           const base64Audio = audioPart.inlineData.data;
@@ -1159,10 +1178,16 @@
           pcmArrays.push(pcmPart);
         }
 
-        updateProgress(90, "すべての音声パーツをシームレスに結合しています...");
-        chunkText.innerText = `結合処理: 合計 ${totalChunks} 個の音声パーツを高速連結中...`;
+        updateProgress(90, "音声パーツを結合しています...");
+        chunkText.innerText = `結合処理: 全 ${totalChunks} 個の音声パーツを高速連結中...`;
 
-        const mergedPcm = concatenateInt16Arrays(pcmArrays);
+        let mergedPcm = concatenateInt16Arrays(pcmArrays);
+
+        // 🔊 トリミング：チェックが入っている場合、末尾の空白バグを自動カット
+        if (enableSilenceTrim) {
+          mergedPcm = trimTrailingSilence(mergedPcm, sampleRate);
+        }
+
         const wavBlob = createWavFile(mergedPcm, sampleRate);
         const audioUrl = URL.createObjectURL(wavBlob);
 
@@ -1190,18 +1215,8 @@
 
       } catch (err) {
         resetLoadingUI();
-        if (generationCancelled) {
-          showStatusNotification("音声生成を中止しました。");
-        } else {
-          showError(`長文音声生成中にエラーが発生しました: ${err.message}`);
-        }
+        showError(`長文音声生成中にエラーが発生しました: ${err.message}`);
       }
-    }
-
-    // 生成中止ボタン
-    function cancelGeneration() {
-      generationCancelled = true;
-      document.getElementById('chunkProgressText').innerText = "中止しています...";
     }
 
     // UI進捗更新
@@ -1275,7 +1290,6 @@
       });
     }
 
-    // 履歴アイテム再生
     function playHistory(id) {
       const item = localHistory.find(h => h.id == id);
       if (item) {
@@ -1295,7 +1309,6 @@
       }
     }
 
-    // 履歴アイテムダウンロード
     function downloadHistory(id) {
       const item = localHistory.find(h => h.id == id);
       if (item) {
@@ -1312,7 +1325,6 @@
       }
     }
 
-    // 履歴全削除
     function clearHistory() {
       if(confirm("読み上げ履歴をすべてクリアしますか？")) {
         localHistory = [];
